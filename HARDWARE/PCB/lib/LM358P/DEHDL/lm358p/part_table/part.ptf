@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'LM358P'
+CLASS = IC
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "DESCRIPTION", "DATASHEET", "HEIGHT";
+{========================================================================================}
+ "Texas Instruments", "LM358P" (!) = "", "DIP794W53P254L959H508Q8N", "Dual-In-Line Packages", "595-LM358P", "https://www.mouser.co.uk/ProductDetail/Texas-Instruments/LM358P?qs=X1HXWTtiZ0QtOTT8%252BVnsyw%3D%3D", "LM358P, Dual Operational Amplifier 0.7MHz 5 to 28V, 8-Pin PDIP", "http://www.ti.com/lit/ds/symlink/lm358a.pdf", "5.08 mm"
+END_PART
+
+END.
