@@ -1,0 +1,9 @@
+Manufacturer=Texas Instruments
+PartNumber=LP2950-33LPRE3
+PartCategory=Integrated Circuit
+PackageCategory=Other
+PinCount=3
+Version=1.4
+Released=2019-08-03 22:48:46
+Downloaded=2025-11-09 14:23:47
+3D=Y

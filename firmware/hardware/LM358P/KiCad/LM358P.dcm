@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP LM358P
+D LM358P, Dual Operational Amplifier 0.7MHz 5 to 28V, 8-Pin PDIP
+K
+F http://www.ti.com/lit/ds/symlink/lm358a.pdf
+$ENDCMP
+#
+#End Doc Library

@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP LP2950-33LPRE3
+D Adjustable Micropower Voltage Regulator With Shutdown
+K
+F http://www.ti.com/lit/gpn/lp2950
+$ENDCMP
+#
+#End Doc Library

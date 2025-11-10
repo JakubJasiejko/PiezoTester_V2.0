@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'LM2596S_5.0_NOPB'
+CLASS = IC
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "DESCRIPTION", "DATASHEET";
+{========================================================================================}
+ "Texas Instruments", "LM2596S-5.0/NOPB" (!) = "", "KTT0005B", "Other", "926-LM2596S-5.0/NOPB", "https://www.mouser.co.uk/ProductDetail/Texas-Instruments/LM2596S-5.0-NOPB?qs=X1J7HmVL2ZHVjCOmW%252BYINA%3D%3D", "Switching Voltage Regulators 150 KHZ 3A STEP-DOWN VLTG REG", "https://www.ti.com/lit/gpn/LM2596"
+END_PART
+
+END.

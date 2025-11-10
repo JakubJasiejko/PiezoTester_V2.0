@@ -1,0 +1,9 @@
+Manufacturer=Texas Instruments
+PartNumber=LM2596S-5.0/NOPB
+PartCategory=Integrated Circuit
+PackageCategory=Other
+PinCount=6
+Version=1.6
+Released=2020-08-18 08:47:31
+Downloaded=2025-11-09 14:02:15
+3D=Y

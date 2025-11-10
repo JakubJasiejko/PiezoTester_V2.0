@@ -1,0 +1,10 @@
+(unit MM)
+
+(package "KTT0005B"
+    (type UNDEF)
+    (uver 2)
+    (mountForm default
+        (footprintRef "KTT0005B")
+        (spec "default")
+    )
+)

@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'LP2950_33LPRE3'
+CLASS = IC
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "DESCRIPTION", "DATASHEET", "HEIGHT";
+{========================================================================================}
+ "Texas Instruments", "LP2950-33LPRE3" (!) = "", "TL431CLPM", "Other", "595-LP2950-33LPRE3", "https://www.mouser.co.uk/ProductDetail/Texas-Instruments/LP2950-33LPRE3?qs=iSMark9AYDUagDsOL8Eqdw%3D%3D", "Adjustable Micropower Voltage Regulator With Shutdown", "http://www.ti.com/lit/gpn/lp2950", "9.34 mm"
+END_PART
+
+END.
