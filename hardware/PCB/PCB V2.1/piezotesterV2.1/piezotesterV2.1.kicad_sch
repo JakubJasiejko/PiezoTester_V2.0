@@ -4237,6 +4237,12 @@
 		(uuid "c9d9bb6c-667d-493c-876d-17cb7edf89ff")
 	)
 	(junction
+		(at 201.93 251.46)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "ccac1e25-dc8d-4110-960b-6d7235473c66")
+	)
+	(junction
 		(at 232.41 53.34)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -4382,6 +4388,16 @@
 	)
 	(wire
 		(pts
+			(xy 212.09 261.62) (xy 223.52 261.62)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "13275625-0725-4a33-879a-35598780d9c0")
+	)
+	(wire
+		(pts
 			(xy 60.96 130.81) (xy 69.85 130.81)
 		)
 		(stroke
@@ -4409,6 +4425,16 @@
 			(type default)
 		)
 		(uuid "1398a934-eaa8-46a5-a90c-9eb5cdc5b83d")
+	)
+	(wire
+		(pts
+			(xy 219.71 237.49) (xy 213.36 237.49)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "13c1864d-851a-4da8-a269-1f43346f4db6")
 	)
 	(wire
 		(pts
@@ -4502,6 +4528,16 @@
 	)
 	(wire
 		(pts
+			(xy 201.93 261.62) (xy 201.93 251.46)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "2587ce95-f4d1-407c-9f48-f94318ce0a25")
+	)
+	(wire
+		(pts
 			(xy 238.76 127) (xy 247.65 127)
 		)
 		(stroke
@@ -4529,6 +4565,16 @@
 			(type default)
 		)
 		(uuid "2b8bb171-d62a-4cd1-b3c1-d8025b689ae4")
+	)
+	(wire
+		(pts
+			(xy 193.04 223.52) (xy 200.66 223.52)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "2c0bd81c-5ea8-41cd-b7ce-3d8d5f424af5")
 	)
 	(wire
 		(pts
@@ -5012,6 +5058,16 @@
 	)
 	(wire
 		(pts
+			(xy 201.93 245.11) (xy 208.28 245.11)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "78ae93fa-4c36-41ed-9e1f-430121b96e83")
+	)
+	(wire
+		(pts
 			(xy 196.85 73.66) (xy 195.58 73.66)
 		)
 		(stroke
@@ -5119,6 +5175,16 @@
 			(type default)
 		)
 		(uuid "83813bc7-a00a-4bf4-b9b3-fa2a6c2d86a7")
+	)
+	(wire
+		(pts
+			(xy 201.93 251.46) (xy 201.93 245.11)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8450ef0b-c401-4373-b513-4d46a669659a")
 	)
 	(wire
 		(pts
@@ -5292,6 +5358,16 @@
 	)
 	(wire
 		(pts
+			(xy 207.01 279.4) (xy 207.01 278.13)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "9a7e1fe1-a044-493a-8004-4f1e09886219")
+	)
+	(wire
+		(pts
 			(xy 224.79 55.88) (xy 241.3 55.88)
 		)
 		(stroke
@@ -5369,6 +5445,16 @@
 			(type default)
 		)
 		(uuid "a54c8246-dc2d-4014-b6f7-253e22230d4f")
+	)
+	(wire
+		(pts
+			(xy 207.01 269.24) (xy 207.01 270.51)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "a8c66bb3-13ee-445f-acfb-7b796a4cba33")
 	)
 	(wire
 		(pts
@@ -5642,6 +5728,16 @@
 	)
 	(wire
 		(pts
+			(xy 189.23 251.46) (xy 201.93 251.46)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "cbee581e-45c1-4faa-ac1a-6a0b61e94813")
+	)
+	(wire
+		(pts
 			(xy 29.21 130.81) (xy 26.67 130.81)
 		)
 		(stroke
@@ -5709,6 +5805,16 @@
 			(type default)
 		)
 		(uuid "d674aca4-9602-425e-b7db-3480140a59d8")
+	)
+	(wire
+		(pts
+			(xy 180.34 251.46) (xy 181.61 251.46)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d747fd3e-5d6b-4509-a45e-8c30c58a51c9")
 	)
 	(wire
 		(pts
@@ -5859,6 +5965,16 @@
 			(type default)
 		)
 		(uuid "e72519d1-c533-464a-ae63-75ac2c33c9bd")
+	)
+	(wire
+		(pts
+			(xy 203.2 223.52) (xy 203.2 237.49)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ea6cdda4-1764-407b-8258-a8f638769d1b")
 	)
 	(wire
 		(pts
@@ -6206,6 +6322,28 @@
 	)
 	(global_label "GPIO17"
 		(shape input)
+		(at 207.01 279.4 270)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "19572950-5430-436e-b15c-173f361092d5")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 207.01 289.2795 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "GPIO17"
+		(shape input)
 		(at 147.32 187.96 270)
 		(fields_autoplaced yes)
 		(effects
@@ -6349,6 +6487,28 @@
 		(uuid "62999109-1c12-4446-bcdb-4e24d4ccfc1c")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 177.8 27.0714 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "12VDC+"
+		(shape input)
+		(at 180.34 251.46 90)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "6853638c-ea80-4280-8fd1-077c21cf8b01")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 180.34 240.8548 90)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -6512,6 +6672,28 @@
 			)
 		)
 	)
+	(global_label "12VDC+"
+		(shape input)
+		(at 193.04 223.52 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "eb39fa9a-5988-474c-ba93-ef0f88237868")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 182.4348 223.52 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
 	(symbol
 		(lib_id "Device:C")
 		(at 227.33 147.32 90)
@@ -6574,6 +6756,75 @@
 			(project "piezotesterV2.1"
 				(path "/0ee9b424-1d36-4115-83d7-f07df84893e8"
 					(reference "C12")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Connector_Generic:Conn_01x02")
+		(at 200.66 218.44 90)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "05bbdf5d-3992-46df-9d6d-31e286fd2ec4")
+		(property "Reference" "J10"
+			(at 200.914 213.614 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "Conn_01x02"
+			(at 210.312 215.138 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Horizontal"
+			(at 200.66 218.44 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 200.66 218.44 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Generic connector, single row, 01x02, script generated (kicad-library-utils/schlib/autogen/connector/)"
+			(at 200.66 218.44 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "2d462b93-2ff9-4cdf-b360-950798d7dbd9")
+		)
+		(pin "2"
+			(uuid "1c3a1fb2-14ae-4bfe-938b-2e63e3a54556")
+		)
+		(instances
+			(project "piezotesterV2.1"
+				(path "/0ee9b424-1d36-4115-83d7-f07df84893e8"
+					(reference "J10")
 					(unit 1)
 				)
 			)
@@ -6644,6 +6895,73 @@
 			(project ""
 				(path "/0ee9b424-1d36-4115-83d7-f07df84893e8"
 					(reference "D2")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 223.52 261.62 90)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "0aaa24cb-c6a7-438c-b59c-676fa0cbbc61")
+		(property "Reference" "#PWR028"
+			(at 229.87 261.62 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "GND"
+			(at 227.33 261.6199 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Footprint" ""
+			(at 223.52 261.62 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 223.52 261.62 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
+			(at 223.52 261.62 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "68cb6c5e-ee96-4240-90be-5bf47308a157")
+		)
+		(instances
+			(project "piezotesterV2.1"
+				(path "/0ee9b424-1d36-4115-83d7-f07df84893e8"
+					(reference "#PWR028")
 					(unit 1)
 				)
 			)
@@ -6848,6 +7166,80 @@
 			(project "piezotesterV2.1"
 				(path "/0ee9b424-1d36-4115-83d7-f07df84893e8"
 					(reference "C4")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Transistor_BJT:BC547")
+		(at 207.01 264.16 90)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "17d3b008-ba27-44ea-893f-ac2768f13e6d")
+		(property "Reference" "Q7"
+			(at 207.01 255.27 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "BC337"
+			(at 207.01 257.81 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Package_TO_SOT_THT:TO-92_Inline"
+			(at 208.915 259.08 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+					(italic yes)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "https://www.onsemi.com/pub/Collateral/BC550-D.pdf"
+			(at 207.01 264.16 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+		(property "Description" "0.1A Ic, 45V Vce, Small Signal NPN Transistor, TO-92"
+			(at 207.01 264.16 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "3"
+			(uuid "11865871-d45b-428f-9e89-9f919d01a936")
+		)
+		(pin "1"
+			(uuid "507bf673-503b-494a-9d10-804264e61b8f")
+		)
+		(pin "2"
+			(uuid "a40e22e4-4c49-40c8-8650-b7db4973a264")
+		)
+		(instances
+			(project "piezotesterV2.1"
+				(path "/0ee9b424-1d36-4115-83d7-f07df84893e8"
+					(reference "Q7")
 					(unit 1)
 				)
 			)
@@ -9774,6 +10166,73 @@
 		)
 	)
 	(symbol
+		(lib_id "1323:R")
+		(at 185.42 251.46 90)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "92d6b170-2c96-4727-b0fb-fdf3edb4f09a")
+		(property "Reference" "R13"
+			(at 185.42 248.666 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "R 68K"
+			(at 185.42 246.38 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_1206_3216Metric"
+			(at 185.42 253.238 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 185.42 251.46 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Resistor"
+			(at 185.42 251.46 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "2"
+			(uuid "d0c593d6-22da-42e0-b06c-8080e75fe4f6")
+		)
+		(pin "1"
+			(uuid "bca535c7-d51f-4438-9173-1ca3b192d693")
+		)
+		(instances
+			(project "piezotesterV2.1"
+				(path "/0ee9b424-1d36-4115-83d7-f07df84893e8"
+					(reference "R13")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "power:GND")
 		(at 46.99 194.31 90)
 		(unit 1)
@@ -11192,6 +11651,73 @@
 		)
 	)
 	(symbol
+		(lib_id "1323:R")
+		(at 207.01 274.32 180)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "d2dbcf99-adbc-4754-8d3f-a265e02b40a4")
+		(property "Reference" "R17"
+			(at 200.66 274.32 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "R 100"
+			(at 202.692 274.32 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_1206_3216Metric"
+			(at 208.788 274.32 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 207.01 274.32 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Resistor"
+			(at 207.01 274.32 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "2"
+			(uuid "ac3596eb-c421-4e3f-a0bb-a2b92e93360d")
+		)
+		(pin "1"
+			(uuid "9209d884-cf6a-4ead-8d4d-da90efa0c0d5")
+		)
+		(instances
+			(project "piezotesterV2.1"
+				(path "/0ee9b424-1d36-4115-83d7-f07df84893e8"
+					(reference "R17")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "ADS1115_Salamon:MCP6002-I_P")
 		(at 189.23 53.34 0)
 		(unit 1)
@@ -11598,6 +12124,148 @@
 			(project ""
 				(path "/0ee9b424-1d36-4115-83d7-f07df84893e8"
 					(reference "#PWR07")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Transistor_FET:IRLZ44N")
+		(at 208.28 240.03 90)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "ed7da696-7171-4741-b0ee-d565ee728066")
+		(property "Reference" "Q8"
+			(at 198.374 240.284 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "IRLZ44N"
+			(at 200.914 240.284 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Package_TO_SOT_THT:TO-220-3_Vertical"
+			(at 210.185 234.95 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+					(italic yes)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "http://www.irf.com/product-info/datasheets/data/irlz44n.pdf"
+			(at 212.09 234.95 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+		(property "Description" "47A Id, 55V Vds, 22mOhm Rds Single N-Channel HEXFET Power MOSFET, TO-220AB"
+			(at 208.28 240.03 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "94c82c13-52de-4fa4-94fe-53132518de3c")
+		)
+		(pin "2"
+			(uuid "3dc2034c-698f-4096-a945-25ef8479a84d")
+		)
+		(pin "3"
+			(uuid "e826cf7c-7f75-49d5-88d4-fdd7d062b097")
+		)
+		(instances
+			(project "piezotesterV2.1"
+				(path "/0ee9b424-1d36-4115-83d7-f07df84893e8"
+					(reference "Q8")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 219.71 237.49 90)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "f0318c5b-4ff2-42fc-af5c-1f8cebe1518d")
+		(property "Reference" "#PWR027"
+			(at 226.06 237.49 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "GND"
+			(at 223.52 237.4899 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Footprint" ""
+			(at 219.71 237.49 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 219.71 237.49 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
+			(at 219.71 237.49 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "4c8e0f9c-79ad-4ec7-a6d7-c17d6fc6e67f")
+		)
+		(instances
+			(project "piezotesterV2.1"
+				(path "/0ee9b424-1d36-4115-83d7-f07df84893e8"
+					(reference "#PWR027")
 					(unit 1)
 				)
 			)

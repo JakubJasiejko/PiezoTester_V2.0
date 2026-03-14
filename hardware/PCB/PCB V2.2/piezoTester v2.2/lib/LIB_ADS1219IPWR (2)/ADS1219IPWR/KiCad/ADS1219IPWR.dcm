@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP ADS1219IPWR
+D 24-Bit, 1kSPS, 4-Ch General-Purpose Delta-Sigma ADC With I2C Interface and External Vref Inputs
+K
+F https://datasheet.datasheetarchive.com/originals/distributors/DKDS41/DSANUWW0029292.pdf
+$ENDCMP
+#
+#End Doc Library

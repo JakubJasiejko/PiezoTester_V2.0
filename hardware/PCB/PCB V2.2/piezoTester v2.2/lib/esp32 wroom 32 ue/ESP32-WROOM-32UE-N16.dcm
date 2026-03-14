@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP ESP32-WROOM-32UE-N16
+D Module: IoT; Bluetooth Low Energy,WiFi; SMD; 18x19.2x3.2mm; U.FL
+K
+F https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32e_esp32-wroom-32ue_datasheet_en.pdf
+$ENDCMP
+#
+#End Doc Library

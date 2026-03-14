@@ -33,7 +33,7 @@ while ~calDone
         line = strtrim(readline(s));
         disp(line)
 
-        if contains(line, "put MASS 1")s
+        if contains(line, "podaj MASA 1")s
             val = NaN;
             while ~isfinite(val)
                 answ = inputdlg("Podaj MASA 1 [kg]:","Kalibracja",1,{"1.000"});

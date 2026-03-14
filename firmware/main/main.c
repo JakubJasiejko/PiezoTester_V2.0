@@ -16,7 +16,6 @@
 
 float V = 3.3f;
 const float vref_ext = 3.3f;
-const float vref_int = 2.048f;
 uint32_t nr = 0;
 float loadCellZero = 0.0f;
 
@@ -38,7 +37,7 @@ const float R1 = 200000.0f;
 const float resistance_measured = 198496.f;
 const float resistance_omomether = 197600.f;
 
-#define MOSFET_PIN        GPIO_NUM_17
+#define MOSFET_PIN        GPIO_NUM_26
 #define MOSFET_ON_LEVEL   0
 #define MOSFET_OFF_LEVEL  1
 
@@ -82,7 +81,8 @@ static float setZero(int8_t type, int8_t gain, float vrefn)
 {
     float acc = 0.0f;
     for (int i = 0; i < ZERO_AVG_SAMPLES; ++i) {
-        acc += ads1219_measure((uint8_t)type, (uint8_t)gain, vrefn, ADS1219_VREF_INTERNAL);
+        acc += ads1219_measure((uint8_t)type, (uint8_t)gain, vrefn, ADS1219_VREF_EXTERNAL);
+         vTaskDelay(pdMS_TO_TICKS(10)); // stabilizacja między pomiarami
     }
     return acc / (float)ZERO_AVG_SAMPLES;
 }
@@ -219,21 +219,23 @@ void calibration(void)
 
     uart_write_bytes(UART_PORT, "CALIBRATION\r\n", strlen("CALIBRATION\r\n"));
 
-    loadCellZero = setZero(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, vref_int);
+    loadCellZero = setZero(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, vref_ext);
     vTaskDelay(pdMS_TO_TICKS(50));
 
     CAL_MASS_1 = uart_read_float_prompt("Podaj MASA 1 [kg]:", pdMS_TO_TICKS(30000));
     snprintf(msg, sizeof(msg), "M1 = %.6f\r\n", CAL_MASS_1);
     uart_write_bytes(UART_PORT, msg, strlen(msg));
 
-    float relative_calibration  = ads1219_measure(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, vref_int, ADS1219_VREF_INTERNAL);
+    float relative_calibration  = ads1219_measure(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, vref_ext, ADS1219_VREF_EXTERNAL);
+         vTaskDelay(pdMS_TO_TICKS(10)); // stabilizacja między pomiarami
     CAL_DIFF_1 = relative_calibration - loadCellZero;
 
     CAL_MASS_2 = uart_read_float_prompt("Podaj MASA 2 [kg]:", pdMS_TO_TICKS(30000));
     snprintf(msg, sizeof(msg), "M2 = %.6f\r\n", CAL_MASS_2);
     uart_write_bytes(UART_PORT, msg, strlen(msg));
 
-    relative_calibration  = ads1219_measure(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, vref_int, ADS1219_VREF_INTERNAL);
+    relative_calibration  = ads1219_measure(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, vref_ext, ADS1219_VREF_EXTERNAL);
+         vTaskDelay(pdMS_TO_TICKS(10)); // stabilizacja między pomiarami
     CAL_DIFF_2 = relative_calibration - loadCellZero;
 
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -253,8 +255,8 @@ void calibration(void)
 }
 
 
-void app_main(void)
-{
+void app_main(void){
+
     gpio_config_t io_conf = {
         .pin_bit_mask = 1ULL << MOSFET_PIN,
         .mode = GPIO_MODE_OUTPUT,
@@ -271,19 +273,32 @@ void app_main(void)
     ADS1219_init(ADS1219_RST_PIN, ADS1219_DRDY_PIN);
     gpio_set_level(ADS1219_RST_PIN, 1);
 
+
+    #ifdef DEBUG 
+        uart_write_bytes(UART_PORT, "DEBUG MODE\r\n", strlen("DEBUG MODE\r\n"));
+        uart_write_bytes(UART_PORT,  "TOGGLING ELECTROMAGNET ON/OFF EVERY 2 SECONDS\r\n", strlen("TOGGLING ELECTROMAGNET ON/OFF EVERY 2 SECONDS\r\n"));
+        gpio_set_level(MOSFET_PIN, MOSFET_ON_LEVEL);
+            for (int i = 0; i < 5; i++) {
+            gpio_set_level(MOSFET_PIN, MOSFET_ON_LEVEL);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            gpio_set_level(MOSFET_PIN, MOSFET_OFF_LEVEL);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            
+    #endif
+
     calibration();
 
     calibrate_two_points();
 
     uart_write_bytes(UART_PORT, "START\r\n", strlen("START\r\n"));
 
-    loadCellZero = setZero(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, vref_int);
+    loadCellZero = setZero(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, vref_ext);
 
     vTaskDelay(pdMS_TO_TICKS(500));
 
     while (1) {
 
-       loadCellZero = setZero(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, vref_int);
+       loadCellZero = setZero(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, vref_ext);
         
         #ifdef DEBUG
         uart_write_bytes(UART_PORT, "put", 3);
@@ -292,12 +307,14 @@ void app_main(void)
         gpio_set_level(MOSFET_PIN, MOSFET_ON_LEVEL);
         vTaskDelay(pdMS_TO_TICKS(2000));
 
-        float relative  = ads1219_measure(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, vref_int, ADS1219_VREF_INTERNAL);
+        float relative  = ads1219_measure(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, vref_ext, ADS1219_VREF_EXTERNAL);
+         vTaskDelay(pdMS_TO_TICKS(10)); // stabilizacja między pomiarami
         float v_single2 = relative - loadCellZero;
         float massKg    = calculateLoad(v_single2);
         float massG = massKg * 1000;
 
         float v_diff01  = ads1219_measure(ADS1219_MEAS_DIFF_01, ADS1219_GAIN_1,  vref_ext, ADS1219_VREF_EXTERNAL);
+         vTaskDelay(pdMS_TO_TICKS(10)); // stabilizacja między pomiarami
         float resistance = calculateResistance(v_diff01);
 #ifdef DEBUG
         {
@@ -325,4 +342,5 @@ void app_main(void)
 
         nr++;
     }
+}
 }

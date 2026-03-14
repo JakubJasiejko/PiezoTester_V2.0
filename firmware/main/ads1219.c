@@ -84,7 +84,7 @@ uint8_t ads1219_configureMeasurement(uint8_t address, uint8_t input, uint8_t gai
 int32_t ads1219_read(uint8_t address) {
     //isr
     while (!ads1219_data_ready()) {
-        vTaskDelay(pdMS_TO_TICKS(1));
+        ;
     }
 
     if (ads1219_readDataTrigger(address) == 0xFF) {
