@@ -239,7 +239,10 @@ class CalibrationDialog(QDialog):
         self.step = 0
         self.busy = False
         self.finished = False
-        self.preview_message = "Zdejmij obciazenie i kliknij 'Ustaw zero podgladu', aby uruchomic podglad aktualnej masy."
+        self.preview_busy = False
+        self.preview_auto_attempted = False
+        self.preview_queue: queue.Queue[tuple[str, object]] = queue.Queue()
+        self.preview_message = "Inicjalizacja ciaglego podgladu masy..."
 
         layout = QVBoxLayout(self)
 
@@ -328,15 +331,13 @@ class CalibrationDialog(QDialog):
         self.set_step(0)
         self.refresh_sensor_status()
         self.preview_timer = QTimer(self)
-        self.preview_timer.timeout.connect(self.refresh_live_preview)
+        self.preview_timer.timeout.connect(self.process_preview_cycle)
         self.preview_timer.start(1000)
+        QTimer.singleShot(150, self.ensure_live_preview_started)
 
     def set_step(self, step: int) -> None:
         self.step = step
-        self.reference_mass_edit.setEnabled(step in (0, 2) and not self.busy and not self.finished)
-        self.save_btn.setEnabled(step in (1, 2) and not self.busy and not self.finished)
-        self.start_btn.setEnabled(step == 0 and not self.busy and not self.finished)
-        self.tare_btn.setEnabled(not self.busy)
+        self.refresh_button_states()
 
         if step == 0:
             self.info.setText(
@@ -355,11 +356,80 @@ class CalibrationDialog(QDialog):
 
     def set_busy(self, busy: bool) -> None:
         self.busy = busy
-        self.start_btn.setEnabled(self.step == 0 and not busy and not self.finished)
-        self.save_btn.setEnabled(self.step in (1, 2) and not busy and not self.finished)
-        self.sensor_calibrate_btn.setEnabled(not busy)
-        self.tare_btn.setEnabled(not busy)
-        self.reference_mass_edit.setEnabled(self.step in (0, 2) and not busy and not self.finished)
+        self.refresh_button_states()
+
+    def refresh_button_states(self) -> None:
+        controls_locked = self.busy or self.preview_busy
+        self.start_btn.setEnabled(self.step == 0 and not controls_locked and not self.finished)
+        self.save_btn.setEnabled(self.step in (1, 2) and not controls_locked and not self.finished)
+        self.sensor_calibrate_btn.setEnabled(not controls_locked)
+        self.tare_btn.setEnabled(not controls_locked)
+        self.reference_mass_edit.setEnabled(self.step in (0, 2) and not controls_locked and not self.finished)
+
+    def process_preview_cycle(self) -> None:
+        self.process_preview_queue()
+        if not self.preview_busy:
+            self.refresh_live_preview()
+
+    def process_preview_queue(self) -> None:
+        try:
+            while True:
+                event, payload = self.preview_queue.get_nowait()
+                self.preview_busy = False
+                self.refresh_button_states()
+
+                if event == "tare_ok":
+                    line = str(payload)
+                    data = parse_key_value_line(line)
+                    zero = float(data.get("zero", "0"))
+                    self.preview_message = f"Podglad masy aktywny. Zero odniesienia: {zero:.9f} V"
+                    self.refresh_live_preview(force=True)
+                    continue
+
+                message = str(payload)
+                self.preview_message = "Nie udalo sie uruchomic ciaglego podgladu. Mozesz sprobowac ponownie przyciskiem."
+                self.update_live_preview_labels(None)
+                self.live_status_label.setText(self.preview_message)
+                QMessageBox.critical(self, "Podglad masy", message)
+        except queue.Empty:
+            return
+
+    def ensure_live_preview_started(self) -> None:
+        if not self.app.client.is_connected() or self.preview_busy or self.busy:
+            return
+        self.start_load_tare(background=True, auto=True)
+
+    def start_load_tare(self, background: bool, auto: bool = False) -> None:
+        if self.preview_busy or self.busy:
+            return
+
+        self.preview_busy = True
+        self.refresh_button_states()
+
+        if auto:
+            self.preview_auto_attempted = True
+            self.live_status_label.setText("Uruchamianie ciaglego podgladu masy... ustawiam zero odniesienia.")
+        else:
+            self.live_status_label.setText("Ustawianie zera podgladu... to moze potrwac kilkadziesiat sekund.")
+        QApplication.processEvents()
+
+        if not background:
+            try:
+                line = self.app.run_load_tare()
+                self.preview_queue.put(("tare_ok", line))
+            except Exception as exc:
+                self.preview_queue.put(("tare_err", str(exc)))
+            self.process_preview_queue()
+            return
+
+        def worker() -> None:
+            try:
+                line = self.app.run_load_tare()
+                self.preview_queue.put(("tare_ok", line))
+            except Exception as exc:
+                self.preview_queue.put(("tare_err", str(exc)))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def refresh_sensor_status(self, message: str | None = None) -> None:
         status = self.app.status
@@ -399,7 +469,7 @@ class CalibrationDialog(QDialog):
         )
 
     def refresh_live_preview(self, force: bool = False) -> None:
-        if (self.busy and not force) or not self.app.client.is_connected():
+        if (self.busy and not force) or self.preview_busy or not self.app.client.is_connected():
             return
 
         try:
@@ -407,6 +477,10 @@ class CalibrationDialog(QDialog):
         except SerialProtocolError as exc:
             self.update_live_preview_labels(None)
             message = str(exc)
+            if "load_preview_failed code=259" in message:
+                if not self.preview_auto_attempted:
+                    self.ensure_live_preview_started()
+                return
             if "load_preview_failed" in message:
                 return
             self.live_status_label.setText(f"Podglad chwilowo niedostepny: {message}")
@@ -419,22 +493,10 @@ class CalibrationDialog(QDialog):
         self.update_live_preview_labels(preview)
 
     def run_load_tare(self) -> None:
-        if self.busy:
+        if self.busy or self.preview_busy:
             return
 
-        try:
-            self.live_status_label.setText("Ustawianie zera podgladu... to moze potrwac kilkadziesiat sekund.")
-            QApplication.processEvents()
-            self.set_busy(True)
-            line = self.app.run_load_tare()
-            data = parse_key_value_line(line)
-            zero = float(data.get("zero", "0"))
-            self.preview_message = f"Zero podgladu ustawione: {zero:.9f} V"
-        except Exception as exc:
-            QMessageBox.critical(self, "Podglad masy", str(exc))
-        finally:
-            self.set_busy(False)
-            self.refresh_live_preview(force=True)
+        self.start_load_tare(background=True, auto=False)
 
     def start_calibration(self) -> None:
         try:
@@ -831,11 +893,31 @@ class TrialSummaryDialog(QDialog):
             path = path.with_suffix(".pdf")
             self.pdf_path_edit.setText(str(path))
 
+        fallback_path = default_export_dir() / path.name
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             self.write_pdf_report(path)
             QMessageBox.information(self, "PDF", f"Zapisano raport PDF:\n{path}")
         except Exception as exc:
+            if fallback_path != path:
+                try:
+                    self.write_pdf_report(fallback_path)
+                    self.pdf_path_edit.setText(str(fallback_path))
+                    QMessageBox.information(
+                        self,
+                        "PDF",
+                        "Nie udalo sie zapisac raportu w wybranej lokalizacji.\n"
+                        f"Zapisano go awaryjnie tutaj:\n{fallback_path}\n\n"
+                        f"Przyczyna pierwotnego bledu: {exc}",
+                    )
+                    return
+                except Exception:
+                    pass
+
             QMessageBox.critical(self, "PDF", str(exc))
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def write_pdf_report(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1081,6 +1163,14 @@ class TrialSummaryDialog(QDialog):
                 y += scaled_height + 34
         finally:
             painter.end()
+            del writer
+
+        if not path.exists():
+            raise RuntimeError(f"Raport PDF nie zostal zapisany: {path}")
+
+        file_size = path.stat().st_size
+        if file_size <= 0:
+            raise RuntimeError(f"Raport PDF ma niepoprawny rozmiar: {path}")
 
 
 class ChartWindow(QMainWindow):
