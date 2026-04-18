@@ -2155,6 +2155,7 @@ class PiezoTesterWindow(QMainWindow):
 
         def worker() -> None:
             setup_done = False
+            finished_normally = False
             try:
                 setup_line = self.run_test_setup(settings)
                 setup_done = True
@@ -2166,8 +2167,13 @@ class PiezoTesterWindow(QMainWindow):
 
                     line = self.client.request_line("TEST_NEXT", ("TEST_RESULT", "TEST_DONE"), timeout=90.0)
                     if line.startswith("TEST_DONE"):
+                        self.ui_queue.put(("test_log", line))
+                        finished_normally = True
                         break
                     self.ui_queue.put(("test_ok", line))
+                else:
+                    if not self.stop_measurement_event.is_set():
+                        finished_normally = True
             except Exception as exc:
                 self.ui_queue.put(("test_err", exc))
             finally:
@@ -2177,6 +2183,8 @@ class PiezoTesterWindow(QMainWindow):
                         self.ui_queue.put(("test_log", abort_line))
                     except Exception:
                         pass
+            if finished_normally:
+                self.ui_queue.put(("test_finished", None))
             self.ui_queue.put(("test_stopped", None))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -2215,6 +2223,8 @@ class PiezoTesterWindow(QMainWindow):
                     self.pending_summary_on_stop = False
                     self.finalize_measurement_loop()
                     QMessageBox.critical(self, "Test", str(payload))
+                elif event == "test_finished":
+                    self.pending_summary_on_stop = True
                 elif event == "test_stopped":
                     if self.measurement_running:
                         self.finalize_measurement_loop()
