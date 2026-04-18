@@ -48,9 +48,10 @@ static const uint8_t ELECTROMAGNET_CONTACT_POINTS_VERSION = 1;
 #define ELECTROMAGNET_MIN_LEARNED_MASS_G 10.0f
 #define ELECTROMAGNET_MODEL_MAX_POINTS 16
 #define ELECTROMAGNET_PULSE_DEFAULT_MS 1500
-#define ELECTROMAGNET_CONTACT_POINT_COUNT 10
-#define ELECTROMAGNET_CONTACT_POINT_START_PCT 95.5f
-#define ELECTROMAGNET_CONTACT_POINT_STEP_PCT 0.5f
+#define ELECTROMAGNET_CONTACT_POINT_MAX_COUNT 32
+#define ELECTROMAGNET_CONTACT_POINT_DEFAULT_COUNT 10
+#define ELECTROMAGNET_CONTACT_POINT_DEFAULT_START_PCT 95.5f
+#define ELECTROMAGNET_CONTACT_POINT_DEFAULT_END_PCT 100.0f
 
 #define ZERO_AVG_SAMPLES 8
 #define AVG_SAMPLES 8
@@ -117,7 +118,10 @@ typedef struct {
 } electromagnet_premodel_t;
 
 typedef struct {
-    uint8_t state[ELECTROMAGNET_CONTACT_POINT_COUNT];
+    uint8_t point_count;
+    float start_pct;
+    float end_pct;
+    uint8_t state[ELECTROMAGNET_CONTACT_POINT_MAX_COUNT];
 } electromagnet_contact_points_t;
 
 typedef struct {
@@ -159,6 +163,7 @@ static test_session_t g_test_session = {0};
 static inline float calculate_load_signal(float zero_voltage, float measured_voltage);
 static esp_err_t save_electromagnet_premodel_to_nvs(void);
 static esp_err_t electromagnet_premodel_set(uint32_t move_threshold_duty, uint32_t contact_threshold_duty, float full_scale_mass_g);
+static esp_err_t electromagnet_premodel_clear(void);
 
 static inline float load_cell_full_scale_voltage(void)
 {
@@ -433,6 +438,9 @@ static void electromagnet_premodel_reset_defaults(void)
 static void electromagnet_contact_points_reset_defaults(void)
 {
     memset(&g_electromagnet_contact_points, 0, sizeof(g_electromagnet_contact_points));
+    g_electromagnet_contact_points.point_count = ELECTROMAGNET_CONTACT_POINT_DEFAULT_COUNT;
+    g_electromagnet_contact_points.start_pct = ELECTROMAGNET_CONTACT_POINT_DEFAULT_START_PCT;
+    g_electromagnet_contact_points.end_pct = ELECTROMAGNET_CONTACT_POINT_DEFAULT_END_PCT;
 }
 
 static uint8_t electromagnet_contact_point_sanitize_state(uint8_t state)
@@ -440,9 +448,21 @@ static uint8_t electromagnet_contact_point_sanitize_state(uint8_t state)
     return (state <= 3U) ? state : 0U;
 }
 
+static uint8_t electromagnet_contact_point_count(void)
+{
+    if (
+        g_electromagnet_contact_points.point_count == 0U ||
+        g_electromagnet_contact_points.point_count > ELECTROMAGNET_CONTACT_POINT_MAX_COUNT
+    ) {
+        return ELECTROMAGNET_CONTACT_POINT_DEFAULT_COUNT;
+    }
+
+    return g_electromagnet_contact_points.point_count;
+}
+
 static uint32_t electromagnet_contact_point_pct_to_duty(float pct)
 {
-    if (!isfinite(pct) || pct < 0.0f || pct >= 100.0f) {
+    if (!isfinite(pct) || pct < 0.0f || pct > 100.0f) {
         return 0U;
     }
 
@@ -456,7 +476,14 @@ static uint32_t electromagnet_contact_point_pct_to_duty(float pct)
 
 static float electromagnet_contact_point_slot_to_pct(uint32_t slot)
 {
-    return ELECTROMAGNET_CONTACT_POINT_START_PCT + ((float)slot * ELECTROMAGNET_CONTACT_POINT_STEP_PCT);
+    const uint8_t point_count = electromagnet_contact_point_count();
+    if (point_count <= 1U) {
+        return g_electromagnet_contact_points.start_pct;
+    }
+
+    const float progress = (float)slot / (float)(point_count - 1U);
+    return g_electromagnet_contact_points.start_pct +
+           (g_electromagnet_contact_points.end_pct - g_electromagnet_contact_points.start_pct) * progress;
 }
 
 static esp_err_t save_electromagnet_contact_points_to_nvs(void)
@@ -504,7 +531,19 @@ static esp_err_t load_electromagnet_contact_points_from_nvs(void)
         return (err != ESP_OK) ? err : ESP_FAIL;
     }
 
-    for (size_t i = 0; i < ELECTROMAGNET_CONTACT_POINT_COUNT; ++i) {
+    if (
+        !isfinite(g_electromagnet_contact_points.start_pct) ||
+        !isfinite(g_electromagnet_contact_points.end_pct) ||
+        g_electromagnet_contact_points.start_pct < 0.0f ||
+        g_electromagnet_contact_points.start_pct > 100.0f ||
+        g_electromagnet_contact_points.end_pct < g_electromagnet_contact_points.start_pct ||
+        g_electromagnet_contact_points.end_pct > 100.0f
+    ) {
+        electromagnet_contact_points_reset_defaults();
+        return ESP_FAIL;
+    }
+
+    for (size_t i = 0; i < ELECTROMAGNET_CONTACT_POINT_MAX_COUNT; ++i) {
         g_electromagnet_contact_points.state[i] =
             electromagnet_contact_point_sanitize_state(g_electromagnet_contact_points.state[i]);
     }
@@ -522,8 +561,9 @@ static esp_err_t electromagnet_contact_points_recompute_premodel(float full_scal
 {
     int move_slot = -1;
     int contact_slot = -1;
+    const uint8_t point_count = electromagnet_contact_point_count();
 
-    for (int i = 0; i < ELECTROMAGNET_CONTACT_POINT_COUNT; ++i) {
+    for (int i = 0; i < point_count; ++i) {
         const uint8_t state = electromagnet_contact_point_sanitize_state(g_electromagnet_contact_points.state[i]);
         if (move_slot < 0 && (state == 2U || state == 3U)) {
             move_slot = i;
@@ -558,7 +598,7 @@ static esp_err_t electromagnet_contact_points_recompute_premodel(float full_scal
 static esp_err_t electromagnet_contact_point_set(uint32_t slot, uint8_t state, float full_scale_mass_g)
 {
     if (
-        slot >= ELECTROMAGNET_CONTACT_POINT_COUNT ||
+        slot >= electromagnet_contact_point_count() ||
         state > 3U ||
         !(full_scale_mass_g > 0.0f) ||
         !isfinite(full_scale_mass_g)
@@ -575,19 +615,49 @@ static esp_err_t electromagnet_contact_point_set(uint32_t slot, uint8_t state, f
     return electromagnet_contact_points_recompute_premodel(full_scale_mass_g);
 }
 
+static esp_err_t electromagnet_contact_points_configure(uint32_t point_count, float start_pct, float end_pct)
+{
+    if (
+        point_count == 0U ||
+        point_count > ELECTROMAGNET_CONTACT_POINT_MAX_COUNT ||
+        !isfinite(start_pct) ||
+        !isfinite(end_pct) ||
+        start_pct < 0.0f ||
+        start_pct > 100.0f ||
+        end_pct < start_pct ||
+        end_pct > 100.0f
+    ) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    g_electromagnet_contact_points.point_count = (uint8_t)point_count;
+    g_electromagnet_contact_points.start_pct = start_pct;
+    g_electromagnet_contact_points.end_pct = end_pct;
+    for (size_t i = 0; i < ELECTROMAGNET_CONTACT_POINT_MAX_COUNT; ++i) {
+        g_electromagnet_contact_points.state[i] = 0U;
+    }
+
+    esp_err_t err = save_electromagnet_contact_points_to_nvs();
+    if (err == ESP_OK) {
+        err = electromagnet_premodel_clear();
+    }
+    return err;
+}
+
 static void electromagnet_contact_points_format(char *buf, size_t buf_size)
 {
-    if (buf_size < (ELECTROMAGNET_CONTACT_POINT_COUNT + 1U)) {
+    const uint8_t point_count = electromagnet_contact_point_count();
+    if (buf_size < ((size_t)point_count + 1U)) {
         if (buf_size > 0U) {
             buf[0] = '\0';
         }
         return;
     }
 
-    for (size_t i = 0; i < ELECTROMAGNET_CONTACT_POINT_COUNT; ++i) {
+    for (size_t i = 0; i < point_count; ++i) {
         buf[i] = (char)('0' + electromagnet_contact_point_sanitize_state(g_electromagnet_contact_points.state[i]));
     }
-    buf[ELECTROMAGNET_CONTACT_POINT_COUNT] = '\0';
+    buf[point_count] = '\0';
 }
 
 static void electromagnet_model_sort(void)
@@ -1674,13 +1744,13 @@ static void send_status(void)
         ((float)electromagnet_premodel_move_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY;
     const float contact_threshold_pct =
         ((float)electromagnet_premodel_contact_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY;
-    char contact_states[ELECTROMAGNET_CONTACT_POINT_COUNT + 1];
+    char contact_states[ELECTROMAGNET_CONTACT_POINT_MAX_COUNT + 1];
     electromagnet_contact_points_format(contact_states, sizeof(contact_states));
     writef(
         "STATUS calibrated=%d nominal_kg_per_v=%.9f kg_per_v=%.9f correction=%.9f "
         "cal_mass=%.6f nominal_mass=%.6f cal_signal=%.9f cal_zero=%.9f "
         "sensor_calibrated=%d sensor_factor=%.9f sensor_ref=%.6f sensor_raw=%.6f sensor_voltage=%.9f "
-        "mag_points=%u mag_pre_valid=%d mag_move=%u mag_move_pct=%.3f mag_contact=%u mag_contact_pct=%.3f mag_full_scale_g=%.3f mag_contact_states=%s "
+        "mag_points=%u mag_pre_valid=%d mag_move=%u mag_move_pct=%.3f mag_contact=%u mag_contact_pct=%.3f mag_full_scale_g=%.3f mag_contact_count=%u mag_contact_start_pct=%.3f mag_contact_end_pct=%.3f mag_contact_states=%s "
         "test_active=%d test_mode=%u test_samples=%u test_index=%u",
         g_calibration.valid ? 1 : 0,
         nominal_kg_per_v,
@@ -1702,6 +1772,9 @@ static void send_status(void)
         (unsigned)electromagnet_premodel_contact_duty(),
         contact_threshold_pct,
         electromagnet_premodel_full_scale_mass_g(),
+        (unsigned)electromagnet_contact_point_count(),
+        g_electromagnet_contact_points.start_pct,
+        g_electromagnet_contact_points.end_pct,
         contact_states,
         g_test_session.active ? 1 : 0,
         (unsigned)g_test_session.mode,
@@ -1961,10 +2034,10 @@ static void handle_command(const char *line)
     }
 
     if (strcmp(line, "MAG_PREMODEL_STATUS") == 0) {
-        char contact_states[ELECTROMAGNET_CONTACT_POINT_COUNT + 1];
+        char contact_states[ELECTROMAGNET_CONTACT_POINT_MAX_COUNT + 1];
         electromagnet_contact_points_format(contact_states, sizeof(contact_states));
         writef(
-            "MAG_PREMODEL valid=%d move=%u move_pct=%.3f contact=%u contact_pct=%.3f full_scale_g=%.3f points=%u contact_states=%s",
+            "MAG_PREMODEL valid=%d move=%u move_pct=%.3f contact=%u contact_pct=%.3f full_scale_g=%.3f points=%u contact_count=%u contact_start_pct=%.3f contact_end_pct=%.3f contact_states=%s",
             g_electromagnet_premodel.valid ? 1 : 0,
             (unsigned)electromagnet_premodel_move_duty(),
             ((float)electromagnet_premodel_move_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY,
@@ -1972,6 +2045,40 @@ static void handle_command(const char *line)
             ((float)electromagnet_premodel_contact_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY,
             electromagnet_premodel_full_scale_mass_g(),
             (unsigned)g_electromagnet_model.point_count,
+            (unsigned)electromagnet_contact_point_count(),
+            g_electromagnet_contact_points.start_pct,
+            g_electromagnet_contact_points.end_pct,
+            contact_states
+        );
+        return;
+    }
+
+    if (strncmp(line, "MAG_CONTACT_CONFIG", 18) == 0) {
+        uint32_t point_count = electromagnet_contact_point_count();
+        float start_pct = g_electromagnet_contact_points.start_pct;
+        float end_pct = g_electromagnet_contact_points.end_pct;
+        const bool has_count = parse_u32_argument(line, "count", &point_count);
+        const bool has_start = parse_float_argument(line, "start_pct", &start_pct);
+        const bool has_end = parse_float_argument(line, "end_pct", &end_pct);
+
+        if (!has_count && !has_start && !has_end) {
+            write_line("ERR mag_contact_config_missing_args");
+            return;
+        }
+
+        const esp_err_t err = electromagnet_contact_points_configure(point_count, start_pct, end_pct);
+        if (err != ESP_OK) {
+            writef("ERR mag_contact_config_failed code=%d", (int)err);
+            return;
+        }
+
+        char contact_states[ELECTROMAGNET_CONTACT_POINT_MAX_COUNT + 1];
+        electromagnet_contact_points_format(contact_states, sizeof(contact_states));
+        writef(
+            "MAG_CONTACT_CONFIG_OK count=%u start_pct=%.3f end_pct=%.3f contact_states=%s",
+            (unsigned)electromagnet_contact_point_count(),
+            g_electromagnet_contact_points.start_pct,
+            g_electromagnet_contact_points.end_pct,
             contact_states
         );
         return;
@@ -2011,10 +2118,10 @@ static void handle_command(const char *line)
             return;
         }
 
-        char contact_states[ELECTROMAGNET_CONTACT_POINT_COUNT + 1];
+        char contact_states[ELECTROMAGNET_CONTACT_POINT_MAX_COUNT + 1];
         electromagnet_contact_points_format(contact_states, sizeof(contact_states));
         writef(
-            "MAG_CONTACT_POINT_SET_OK slot=%u state=%u move=%u move_pct=%.3f contact=%u contact_pct=%.3f full_scale_g=%.3f contact_states=%s",
+            "MAG_CONTACT_POINT_SET_OK slot=%u state=%u move=%u move_pct=%.3f contact=%u contact_pct=%.3f full_scale_g=%.3f count=%u start_pct=%.3f end_pct=%.3f contact_states=%s",
             (unsigned)slot,
             (unsigned)state,
             (unsigned)electromagnet_premodel_move_duty(),
@@ -2022,6 +2129,9 @@ static void handle_command(const char *line)
             (unsigned)electromagnet_premodel_contact_duty(),
             ((float)electromagnet_premodel_contact_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY,
             electromagnet_premodel_full_scale_mass_g(),
+            (unsigned)electromagnet_contact_point_count(),
+            g_electromagnet_contact_points.start_pct,
+            g_electromagnet_contact_points.end_pct,
             contact_states
         );
         return;
@@ -2190,7 +2300,7 @@ static void handle_command(const char *line)
     }
 
     if (strcmp(line, "HELP") == 0) {
-        write_line("OK commands=PING,STATUS,CAL_START,CAL_ZERO,CAL_POINT <kg>,CAL_SAVE,LOAD_TARE,LOAD_PREVIEW,SENSOR_CAL <ohm>,MAG_PULSE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_MEASURE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_PREMODEL_SET [move=<n>|move_pct=<x>] [contact=<n>|contact_pct=<x>] [threshold=<n>|threshold_pct=<x>] [full_scale_g=<g>],MAG_PREMODEL_CLEAR,MAG_PREMODEL_STATUS,MAG_CONTACT_POINT_SET slot=<0-9> state=<unknown|no_contact|moved|contact> [full_scale_g=<g>],MAG_CONTACT_POINTS_CLEAR,MAG_MODEL_CLEAR,TEST_SETUP mode=<standard|ramp> start_g=<g> end_g=<g> samples=<n>,TEST_NEXT,TEST_ABORT,TEST,HELP");
+        write_line("OK commands=PING,STATUS,CAL_START,CAL_ZERO,CAL_POINT <kg>,CAL_SAVE,LOAD_TARE,LOAD_PREVIEW,SENSOR_CAL <ohm>,MAG_PULSE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_MEASURE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_PREMODEL_SET [move=<n>|move_pct=<x>] [contact=<n>|contact_pct=<x>] [threshold=<n>|threshold_pct=<x>] [full_scale_g=<g>],MAG_PREMODEL_CLEAR,MAG_PREMODEL_STATUS,MAG_CONTACT_CONFIG count=<n> start_pct=<x> end_pct=<x>,MAG_CONTACT_POINT_SET slot=<n> state=<unknown|no_contact|moved|contact> [full_scale_g=<g>],MAG_CONTACT_POINTS_CLEAR,MAG_MODEL_CLEAR,TEST_SETUP mode=<standard|ramp> start_g=<g> end_g=<g> samples=<n>,TEST_NEXT,TEST_ABORT,TEST,HELP");
         return;
     }
 

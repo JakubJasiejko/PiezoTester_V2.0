@@ -72,6 +72,9 @@ class CalibrationStatus:
     mag_contact: int = 0
     mag_contact_pct: float = 0.0
     mag_full_scale_g: float = 0.0
+    mag_contact_count: int = 10
+    mag_contact_start_pct: float = 95.5
+    mag_contact_end_pct: float = 100.0
     mag_contact_states: str = ""
 
 
@@ -795,7 +798,7 @@ class AdvancedCalibrationDialog(QDialog):
         self.worker_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.curve_running = False
         self.curve_stop_requested = False
-        self.contact_pwm_points = [95.5 + 0.5 * idx for idx in range(10)]
+        self.contact_pwm_points: list[float] = []
         self.contact_point_states: dict[float, str] = {}
         self.contact_state_labels: dict[float, QLabel] = {}
 
@@ -831,29 +834,29 @@ class AdvancedCalibrationDialog(QDialog):
         self.contact_hold_ms_spin.setSuffix(" ms")
         contact_form.addRow("Czas impulsu", self.contact_hold_ms_spin)
 
-        self.move_threshold_pct_spin = QDoubleSpinBox()
-        self.move_threshold_pct_spin.setRange(0.0, 100.0)
-        self.move_threshold_pct_spin.setDecimals(3)
-        self.move_threshold_pct_spin.setSingleStep(0.1)
-        self.move_threshold_pct_spin.setSuffix(" %")
-        contact_form.addRow("Prog ruchu", self.move_threshold_pct_spin)
+        self.contact_sample_count_spin = QSpinBox()
+        self.contact_sample_count_spin.setRange(2, 32)
+        self.contact_sample_count_spin.setValue(10)
+        contact_form.addRow("Ilosc probek", self.contact_sample_count_spin)
 
-        self.contact_threshold_pct_spin = QDoubleSpinBox()
-        self.contact_threshold_pct_spin.setRange(0.0, 100.0)
-        self.contact_threshold_pct_spin.setDecimals(3)
-        self.contact_threshold_pct_spin.setSingleStep(0.1)
-        self.contact_threshold_pct_spin.setSuffix(" %")
-        contact_form.addRow("Prog kontaktu", self.contact_threshold_pct_spin)
+        self.contact_start_pct_spin = QDoubleSpinBox()
+        self.contact_start_pct_spin.setRange(0.0, 100.0)
+        self.contact_start_pct_spin.setDecimals(3)
+        self.contact_start_pct_spin.setSingleStep(0.1)
+        self.contact_start_pct_spin.setValue(95.5)
+        self.contact_start_pct_spin.setSuffix(" %")
+        contact_form.addRow("Wypelnienie poczatkowe", self.contact_start_pct_spin)
 
-        self.full_scale_mass_spin = QDoubleSpinBox()
-        self.full_scale_mass_spin.setRange(1.0, 50000.0)
-        self.full_scale_mass_spin.setDecimals(1)
-        self.full_scale_mass_spin.setSingleStep(50.0)
-        self.full_scale_mass_spin.setSuffix(" g")
-        contact_form.addRow("Pelna skala modelu", self.full_scale_mass_spin)
+        self.contact_end_pct_spin = QDoubleSpinBox()
+        self.contact_end_pct_spin.setRange(0.0, 100.0)
+        self.contact_end_pct_spin.setDecimals(3)
+        self.contact_end_pct_spin.setSingleStep(0.1)
+        self.contact_end_pct_spin.setValue(100.0)
+        self.contact_end_pct_spin.setSuffix(" %")
+        contact_form.addRow("Wypelnienie koncowe", self.contact_end_pct_spin)
         contact_layout.addLayout(contact_form)
 
-        self.contact_table = QTableWidget(len(self.contact_pwm_points), 6)
+        self.contact_table = QTableWidget(0, 6)
         self.contact_table.setHorizontalHeaderLabels(
             ["PWM [%]", "Wyslij", "Nie dotknelo", "Poruszyl sie", "Dotknelo", "Stan"]
         )
@@ -862,31 +865,6 @@ class AdvancedCalibrationDialog(QDialog):
         self.contact_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.contact_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self.contact_table.setMinimumHeight(320)
-        for row, pwm_pct in enumerate(self.contact_pwm_points):
-            pwm_item = QTableWidgetItem(f"{pwm_pct:.1f}")
-            pwm_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.contact_table.setItem(row, 0, pwm_item)
-
-            send_btn = QPushButton("Wyslij")
-            send_btn.clicked.connect(lambda _checked=False, value=pwm_pct: self.send_contact_pulse(value))
-            self.contact_table.setCellWidget(row, 1, send_btn)
-
-            no_btn = QPushButton("Nie")
-            no_btn.clicked.connect(lambda _checked=False, value=pwm_pct: self.mark_contact_point(value, "no_contact"))
-            self.contact_table.setCellWidget(row, 2, no_btn)
-
-            move_btn = QPushButton("Ruch")
-            move_btn.clicked.connect(lambda _checked=False, value=pwm_pct: self.mark_contact_point(value, "moved"))
-            self.contact_table.setCellWidget(row, 3, move_btn)
-
-            yes_btn = QPushButton("Dotknelo")
-            yes_btn.clicked.connect(lambda _checked=False, value=pwm_pct: self.mark_contact_point(value, "contact"))
-            self.contact_table.setCellWidget(row, 4, yes_btn)
-
-            state_label = QLabel("Nieoznaczone")
-            state_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.contact_state_labels[pwm_pct] = state_label
-            self.contact_table.setCellWidget(row, 5, state_label)
         contact_layout.addWidget(self.contact_table)
 
         self.contact_status_label = QLabel()
@@ -977,39 +955,50 @@ class AdvancedCalibrationDialog(QDialog):
         self.timer.timeout.connect(self.process_worker_queue)
         self.timer.start(120)
 
+        self.contact_sample_count_spin.valueChanged.connect(self.handle_contact_layout_change)
+        self.contact_start_pct_spin.valueChanged.connect(self.handle_contact_layout_change)
+        self.contact_end_pct_spin.valueChanged.connect(self.handle_contact_layout_change)
+
         self.sync_from_status()
         self.refresh_ui_state()
 
     def sync_from_status(self) -> None:
         status = self.app.status
-        move_pct = status.mag_move_pct if status.mag_pre_valid else max(90.0, status.mag_contact_pct or 90.0)
-        contact_pct = status.mag_contact_pct if status.mag_pre_valid else max(move_pct, 95.5)
-        full_scale_g = status.mag_full_scale_g if status.mag_full_scale_g > 0 else 5000.0
-
         state_map = {
             "0": "unknown",
             "1": "no_contact",
             "2": "moved",
             "3": "contact",
         }
-        self.contact_point_states = {}
+        point_count = max(2, min(32, status.mag_contact_count or 10))
+        start_pct = max(0.0, min(100.0, status.mag_contact_start_pct))
+        end_pct = max(start_pct, min(100.0, status.mag_contact_end_pct))
+
+        self.contact_sample_count_spin.blockSignals(True)
+        self.contact_start_pct_spin.blockSignals(True)
+        self.contact_end_pct_spin.blockSignals(True)
+        self.contact_sample_count_spin.setValue(point_count)
+        self.contact_start_pct_spin.setValue(start_pct)
+        self.contact_end_pct_spin.setValue(end_pct)
+        self.contact_sample_count_spin.blockSignals(False)
+        self.contact_start_pct_spin.blockSignals(False)
+        self.contact_end_pct_spin.blockSignals(False)
+
+        self.rebuild_contact_table()
         for idx, pwm_pct in enumerate(self.contact_pwm_points):
             state_code = status.mag_contact_states[idx] if idx < len(status.mag_contact_states) else "0"
             self.contact_point_states[pwm_pct] = state_map.get(state_code, "unknown")
 
-        self.move_threshold_pct_spin.setValue(move_pct)
-        self.contact_threshold_pct_spin.setValue(contact_pct)
-        self.full_scale_mass_spin.setValue(full_scale_g)
-        self.curve_start_pct_spin.setValue(max(95.5, min(100.0, contact_pct)))
+        self.curve_start_pct_spin.setValue(max(start_pct, min(100.0, status.mag_contact_pct or start_pct)))
         self.update_status_labels()
 
     def refresh_ui_state(self) -> None:
         idle = not self.curve_running
         for widget in (
             self.contact_hold_ms_spin,
-            self.move_threshold_pct_spin,
-            self.contact_threshold_pct_spin,
-            self.full_scale_mass_spin,
+            self.contact_sample_count_spin,
+            self.contact_start_pct_spin,
+            self.contact_end_pct_spin,
             self.curve_start_pct_spin,
             self.curve_end_pct_spin,
             self.curve_step_pct_spin,
@@ -1029,13 +1018,13 @@ class AdvancedCalibrationDialog(QDialog):
             f"punkty PWM->masa={status.mag_points}, "
             f"prog ruchu={status.mag_move_pct:.3f}%, "
             f"prog kontaktu={status.mag_contact_pct:.3f}%, "
-            f"pelna skala={status.mag_full_scale_g:.1f} g"
+            f"siatka kontaktu={status.mag_contact_count} pkt od {status.mag_contact_start_pct:.3f}% do {status.mag_contact_end_pct:.3f}%"
         )
         self.update_contact_state_labels()
         self.contact_status_label.setText(
             "Kontakt: wyslij impuls w wybranym wierszu i zaznacz wynik. "
-            f"Aktualny prog ruchu: {self.move_threshold_pct_spin.value():.3f}% | "
-            f"prog kontaktu: {self.contact_threshold_pct_spin.value():.3f}%."
+            f"Aktualny prog ruchu: {status.mag_move_pct:.3f}% | "
+            f"prog kontaktu: {status.mag_contact_pct:.3f}%."
         )
         if self.curve_running:
             self.curve_status_label.setText("Automat kalibracji krzywej pracuje...")
@@ -1078,21 +1067,94 @@ class AdvancedCalibrationDialog(QDialog):
             label.setText(state_text[state])
             label.setStyleSheet(state_style[state])
 
+    def rebuild_contact_table(self) -> None:
+        count = self.contact_sample_count_spin.value()
+        start_pct = self.contact_start_pct_spin.value()
+        end_pct = max(start_pct, self.contact_end_pct_spin.value())
+        self.contact_end_pct_spin.blockSignals(True)
+        self.contact_end_pct_spin.setValue(end_pct)
+        self.contact_end_pct_spin.blockSignals(False)
+
+        old_states = dict(self.contact_point_states)
+        self.contact_state_labels = {}
+        self.contact_pwm_points = []
+        self.contact_table.setRowCount(0)
+        step = 0.0 if count <= 1 else (end_pct - start_pct) / float(count - 1)
+
+        for row in range(count):
+            pwm_pct = round(start_pct + step * row, 3)
+            self.contact_pwm_points.append(pwm_pct)
+            self.contact_table.insertRow(row)
+
+            pwm_item = QTableWidgetItem(f"{pwm_pct:.3f}")
+            pwm_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.contact_table.setItem(row, 0, pwm_item)
+
+            send_btn = QPushButton("Wyslij")
+            send_btn.clicked.connect(lambda _checked=False, value=pwm_pct: self.send_contact_pulse(value))
+            self.contact_table.setCellWidget(row, 1, send_btn)
+
+            no_btn = QPushButton("Nie")
+            no_btn.clicked.connect(lambda _checked=False, value=pwm_pct: self.mark_contact_point(value, "no_contact"))
+            self.contact_table.setCellWidget(row, 2, no_btn)
+
+            move_btn = QPushButton("Ruch")
+            move_btn.clicked.connect(lambda _checked=False, value=pwm_pct: self.mark_contact_point(value, "moved"))
+            self.contact_table.setCellWidget(row, 3, move_btn)
+
+            yes_btn = QPushButton("Dotknelo")
+            yes_btn.clicked.connect(lambda _checked=False, value=pwm_pct: self.mark_contact_point(value, "contact"))
+            self.contact_table.setCellWidget(row, 4, yes_btn)
+
+            state_label = QLabel("Nieoznaczone")
+            state_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.contact_state_labels[pwm_pct] = state_label
+            self.contact_table.setCellWidget(row, 5, state_label)
+
+        self.contact_point_states = {pwm_pct: old_states.get(pwm_pct, "unknown") for pwm_pct in self.contact_pwm_points}
+        self.update_contact_state_labels()
+
+    def handle_contact_layout_change(self) -> None:
+        self.rebuild_contact_table()
+        self.contact_status_label.setText(
+            "Zmieniono siatke PWM dla kalibracji kontaktu. Przy pierwszej akcji zostanie zapisana do ESP32."
+        )
+
     def recompute_contact_thresholds(self) -> tuple[float, float]:
         moved_points = [pwm for pwm, state in self.contact_point_states.items() if state in ("moved", "contact")]
         contact_points = [pwm for pwm, state in self.contact_point_states.items() if state == "contact"]
 
-        move_pct = min(moved_points) if moved_points else max(95.5, self.move_threshold_pct_spin.value())
-        contact_pct = min(contact_points) if contact_points else max(move_pct, self.contact_threshold_pct_spin.value())
+        move_pct = min(moved_points) if moved_points else self.contact_start_pct_spin.value()
+        contact_pct = min(contact_points) if contact_points else max(move_pct, self.contact_start_pct_spin.value())
         contact_pct = max(move_pct, contact_pct)
         return move_pct, contact_pct
 
+    def ensure_contact_config_synced(self) -> None:
+        desired_count = self.contact_sample_count_spin.value()
+        desired_start = self.contact_start_pct_spin.value()
+        desired_end = self.contact_end_pct_spin.value()
+        status = self.app.status
+        if (
+            status.mag_contact_count == desired_count
+            and abs(status.mag_contact_start_pct - desired_start) < 1e-6
+            and abs(status.mag_contact_end_pct - desired_end) < 1e-6
+        ):
+            return
+
+        self.app.run_magnet_contact_config(
+            count=desired_count,
+            start_pct=desired_start,
+            end_pct=desired_end,
+        )
+        self.app.fetch_status()
+        self.sync_from_status()
+
     def autosave_contact_thresholds(self, pwm_pct: float) -> str:
-        self.recompute_contact_thresholds()
+        self.ensure_contact_config_synced()
         line = self.app.run_magnet_contact_point_set(
             slot=self.contact_pwm_points.index(pwm_pct),
             state=self.contact_point_states[pwm_pct],
-            full_scale_g=self.full_scale_mass_spin.value(),
+            full_scale_g=self.app.status.mag_full_scale_g if self.app.status.mag_full_scale_g > 0 else 5000.0,
         )
         self.app.fetch_status()
         self.sync_from_status()
@@ -1100,6 +1162,7 @@ class AdvancedCalibrationDialog(QDialog):
 
     def send_contact_pulse(self, pwm_pct: float) -> None:
         try:
+            self.ensure_contact_config_synced()
             line = self.app.run_magnet_pulse(
                 pwm_pct,
                 self.contact_hold_ms_spin.value(),
@@ -1999,6 +2062,9 @@ class PiezoTesterWindow(QMainWindow):
                 mag_contact=int(data.get("mag_contact", "0")),
                 mag_contact_pct=float(data.get("mag_contact_pct", "0")),
                 mag_full_scale_g=float(data.get("mag_full_scale_g", "0")),
+                mag_contact_count=int(data.get("mag_contact_count", "10")),
+                mag_contact_start_pct=float(data.get("mag_contact_start_pct", "95.5")),
+                mag_contact_end_pct=float(data.get("mag_contact_end_pct", "100.0")),
                 mag_contact_states=str(data.get("mag_contact_states", "")),
             )
             self.update_calibration_labels()
@@ -2154,6 +2220,15 @@ class PiezoTesterWindow(QMainWindow):
         line = self.client.request_line(
             f"MAG_CONTACT_POINT_SET slot={slot} state={state} full_scale_g={full_scale_g:.3f}",
             ("MAG_CONTACT_POINT_SET_OK",),
+            timeout=20.0,
+        )
+        self.log(line)
+        return line
+
+    def run_magnet_contact_config(self, count: int, start_pct: float, end_pct: float) -> str:
+        line = self.client.request_line(
+            f"MAG_CONTACT_CONFIG count={count} start_pct={start_pct:.3f} end_pct={end_pct:.3f}",
+            ("MAG_CONTACT_CONFIG_OK",),
             timeout=20.0,
         )
         self.log(line)
