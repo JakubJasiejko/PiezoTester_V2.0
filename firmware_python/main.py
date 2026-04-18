@@ -2058,6 +2058,7 @@ class PiezoTesterWindow(QMainWindow):
         self.session_started_at: datetime | None = None
         self.session_finished_at: datetime | None = None
         self.pending_summary_on_stop = False
+        self.pending_summary_warning: str | None = None
         self.closing = False
         self.current_test_settings: TestSettings | None = None
 
@@ -2412,8 +2413,16 @@ class PiezoTesterWindow(QMainWindow):
         self.session_started_at = datetime.now()
         self.session_finished_at = None
         self.pending_summary_on_stop = False
+        self.pending_summary_warning = None
         self.current_test_settings = settings
         self.chart_window.refresh_chart()
+
+    def test_next_timeout(self, settings: TestSettings) -> float:
+        if settings.mode == "hysteresis":
+            return 120.0
+        if settings.mode == "ramp":
+            return 150.0
+        return 150.0
 
     def trigger_test(self, settings: TestSettings) -> None:
         if self.measurement_running:
@@ -2441,7 +2450,29 @@ class PiezoTesterWindow(QMainWindow):
                     if self.stop_measurement_event.is_set():
                         break
 
-                    line = self.client.request_line("TEST_NEXT", ("TEST_RESULT", "TEST_DONE"), timeout=90.0)
+                    last_exc: Exception | None = None
+                    line = ""
+                    for attempt in range(3):
+                        try:
+                            line = self.client.request_line(
+                                "TEST_NEXT",
+                                ("TEST_RESULT", "TEST_DONE"),
+                                timeout=self.test_next_timeout(settings),
+                            )
+                            last_exc = None
+                            break
+                        except SerialProtocolError as exc:
+                            last_exc = exc
+                            self.ui_queue.put(
+                                (
+                                    "test_log",
+                                    f"Ostrzezenie: proba {attempt + 1}/3 odczytu TEST_NEXT nieudana: {exc}",
+                                )
+                            )
+                            time.sleep(0.4)
+                    if last_exc is not None:
+                        raise last_exc
+
                     if line.startswith("TEST_DONE"):
                         self.ui_queue.put(("test_log", line))
                         finished_normally = True
@@ -2501,9 +2532,22 @@ class PiezoTesterWindow(QMainWindow):
                 elif event == "test_log":
                     self.log(str(payload))
                 elif event == "test_err":
-                    self.pending_summary_on_stop = False
+                    self.pending_summary_on_stop = bool(self.results)
+                    self.pending_summary_warning = str(payload) if self.results else None
                     self.finalize_measurement_loop()
-                    QMessageBox.critical(self, "Test", str(payload))
+                    if self.results:
+                        QMessageBox.warning(
+                            self,
+                            "Test",
+                            "Pomiar zakonczyl sie bledem po zapisaniu czesci danych.\n"
+                            f"Szczegoly: {payload}\n"
+                            "Zostanie otwarte podsumowanie niepelnej serii.",
+                        )
+                        if not self.closing:
+                            self.pending_summary_on_stop = False
+                            self.open_trial_summary_dialog()
+                    else:
+                        QMessageBox.critical(self, "Test", str(payload))
                 elif event == "test_finished":
                     self.pending_summary_on_stop = True
                 elif event == "test_stopped":
