@@ -1656,7 +1656,7 @@ static float test_session_target_mass_g(uint16_t index)
 
 static uint16_t test_session_total_steps(void)
 {
-    if (!g_test_session.active) {
+    if (g_test_session.sample_count == 0U) {
         return 0U;
     }
 
@@ -1837,12 +1837,17 @@ static esp_err_t test_session_next(test_result_t *result_out)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!g_test_session.active || g_test_session.sample_count == 0) {
+    const uint16_t total_steps = test_session_total_steps();
+    if (g_test_session.sample_count == 0U) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (g_test_session.current_index >= test_session_total_steps()) {
+    if (g_test_session.current_index >= total_steps) {
         return ESP_ERR_NOT_FINISHED;
+    }
+
+    if (!g_test_session.active) {
+        return ESP_ERR_INVALID_STATE;
     }
 
     const uint32_t session_index = (uint32_t)g_test_session.current_index;
@@ -1893,7 +1898,7 @@ static esp_err_t test_session_next(test_result_t *result_out)
     }
 
     g_test_session.current_index++;
-    if (g_test_session.current_index >= test_session_total_steps()) {
+    if (g_test_session.current_index >= total_steps) {
         g_test_session.active = false;
     }
 
