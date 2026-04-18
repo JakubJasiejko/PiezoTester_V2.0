@@ -379,6 +379,7 @@ class CalibrationDialog(QDialog):
         self.preview_busy = False
         self.preview_auto_attempted = False
         self.preview_suspended = False
+        self.preview_started_once = False
         self.preview_generation = 0
         self.preview_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.preview_message = "Inicjalizacja ciaglego podgladu masy..."
@@ -464,8 +465,18 @@ class CalibrationDialog(QDialog):
         self.refresh_sensor_status()
         self.preview_timer = QTimer(self)
         self.preview_timer.timeout.connect(self.process_preview_cycle)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self.preview_started_once:
+            return
+        self.preview_started_once = True
         self.preview_timer.start(350)
-        QTimer.singleShot(50, self.ensure_live_preview_started)
+        QTimer.singleShot(0, self.ensure_live_preview_started)
+
+    def closeEvent(self, event) -> None:
+        self.suspend_preview()
+        super().closeEvent(event)
 
     def set_step(self, step: int) -> None:
         self.step = step
@@ -533,7 +544,13 @@ class CalibrationDialog(QDialog):
             return
 
     def ensure_live_preview_started(self) -> None:
-        if not self.app.client.is_connected() or self.preview_busy or self.busy or self.preview_suspended:
+        if (
+            not self.isVisible()
+            or not self.app.client.is_connected()
+            or self.preview_busy
+            or self.busy
+            or self.preview_suspended
+        ):
             return
         self.start_load_tare(background=True, auto=True)
 
@@ -548,7 +565,7 @@ class CalibrationDialog(QDialog):
         self.preview_suspended = False
         self.preview_timer.start(350)
         self.refresh_button_states()
-        QTimer.singleShot(50, self.ensure_live_preview_started)
+        QTimer.singleShot(0, self.ensure_live_preview_started)
 
     def start_load_tare(self, background: bool, auto: bool = False) -> None:
         if self.preview_busy or self.busy or self.preview_suspended:
@@ -563,7 +580,6 @@ class CalibrationDialog(QDialog):
             self.live_status_label.setText("Uruchamianie ciaglego podgladu masy... ustawiam zero odniesienia.")
         else:
             self.live_status_label.setText("Ustawianie zera podgladu... to moze potrwac kilkadziesiat sekund.")
-        QApplication.processEvents()
 
         if not background:
             try:
@@ -671,7 +687,6 @@ class CalibrationDialog(QDialog):
             if current_step == 1:
                 self.suspend_preview()
                 self.live_status_label.setText("Zapisywanie zera kalibracyjnego... to moze potrwac kilkadziesiat sekund.")
-                QApplication.processEvents()
                 self.app.run_calibration_zero()
                 self.set_step(2)
                 self.preview_message = "Zero kalibracyjne zapisane. Poloz znana mase i obserwuj ciagly pomiar aktualnej masy."
@@ -752,12 +767,14 @@ class CalibrationDialog(QDialog):
         if self.busy or self.preview_busy:
             return
         self.suspend_preview()
-        self.app.fetch_status()
-        dialog = AdvancedCalibrationDialog(self.app)
-        dialog.exec()
-        self.app.fetch_status()
-        self.resume_preview()
-        self.refresh_sensor_status()
+        try:
+            self.app.fetch_status()
+            dialog = AdvancedCalibrationDialog(self.app)
+            dialog.exec()
+            self.app.fetch_status()
+            self.refresh_sensor_status()
+        finally:
+            self.resume_preview()
         self.refresh_live_preview(force=True)
 
 
