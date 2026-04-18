@@ -61,6 +61,7 @@ static const uint8_t ELECTROMAGNET_CONTACT_POINTS_VERSION = 1;
 #define HYSTERESIS_BURST_SAMPLES 12
 #define HYSTERESIS_TRACE_POINTS 24
 #define HYSTERESIS_TRACE_INTERVAL_MS 2
+#define INTER_SAMPLE_DELAY_MS 10000
 
 typedef struct {
     bool valid;
@@ -1894,6 +1895,13 @@ static esp_err_t test_session_next(test_result_t *result_out)
     g_test_session.current_index++;
     if (g_test_session.current_index >= test_session_total_steps()) {
         g_test_session.active = false;
+    }
+
+    if (
+        g_test_session.active &&
+        g_test_session.mode != TEST_MODE_HYSTERESIS
+    ) {
+        vTaskDelay(pdMS_TO_TICKS(INTER_SAMPLE_DELAY_MS));
     }
 
     *result_out = result;
