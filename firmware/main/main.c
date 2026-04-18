@@ -50,7 +50,9 @@ static const uint8_t ELECTROMAGNET_PREMODEL_VERSION = 2;
 
 #define ZERO_AVG_SAMPLES 8
 #define AVG_SAMPLES 8
-#define CAL_STAGE_MEASUREMENTS 10
+#define FAST_ZERO_AVG_SAMPLES 4
+#define FAST_AVG_SAMPLES 4
+#define CAL_STAGE_MEASUREMENTS 4
 
 typedef struct {
     bool valid;
@@ -182,13 +184,20 @@ static void calibration_invalidate_model(void)
     g_calibration.cal_diff_2 = 0.0f;
 }
 
-static float ads1219_measure(uint8_t mux_sel, uint8_t gain_sel, float vref, uint8_t reference)
+static float ads1219_measure_configured(
+    uint8_t mux_sel,
+    uint8_t gain_sel,
+    uint8_t rate_sel,
+    float vref,
+    uint8_t reference,
+    int target_samples
+)
 {
     ads1219_configureMeasurement(
         ADS1219_ADRESS,
         mux_sel,
         gain_sel,
-        ADS1219_DATA_RATE_20SPS,
+        rate_sel,
         ADS1219_CONV_MODE_SINGLE,
         reference
     );
@@ -199,8 +208,9 @@ static float ads1219_measure(uint8_t mux_sel, uint8_t gain_sel, float vref, uint
     float sum = 0.0f;
     bool skip_first_valid = true;
     int valid_samples = 0;
+    const int minimum_valid_samples = (target_samples >= 4) ? (target_samples / 2) : 1;
 
-    for (int attempt = 0; attempt < (AVG_SAMPLES + 1) * 2 && valid_samples < AVG_SAMPLES; ++attempt) {
+    for (int attempt = 0; attempt < (target_samples + 1) * 3 && valid_samples < target_samples; ++attempt) {
         ads1219_startSync(ADS1219_ADRESS);
         const int32_t raw = ads1219_read(ADS1219_ADRESS);
         if (raw == 0x7FFFFFFF) {
@@ -218,11 +228,35 @@ static float ads1219_measure(uint8_t mux_sel, uint8_t gain_sel, float vref, uint
         valid_samples++;
     }
 
-    if (valid_samples < (AVG_SAMPLES / 2)) {
+    if (valid_samples < minimum_valid_samples) {
         return NAN;
     }
 
     return sum / (float)valid_samples;
+}
+
+static float ads1219_measure(uint8_t mux_sel, uint8_t gain_sel, float vref, uint8_t reference)
+{
+    return ads1219_measure_configured(
+        mux_sel,
+        gain_sel,
+        ADS1219_DATA_RATE_20SPS,
+        vref,
+        reference,
+        AVG_SAMPLES
+    );
+}
+
+static float ads1219_measure_fast(uint8_t mux_sel, uint8_t gain_sel, float vref, uint8_t reference)
+{
+    return ads1219_measure_configured(
+        mux_sel,
+        gain_sel,
+        ADS1219_DATA_RATE_330SPS,
+        vref,
+        reference,
+        FAST_AVG_SAMPLES
+    );
 }
 
 static float set_zero(int8_t type, int8_t gain, float vref)
@@ -237,13 +271,25 @@ static float set_zero(int8_t type, int8_t gain, float vref)
     return acc / (float)ZERO_AVG_SAMPLES;
 }
 
+static float set_zero_fast(int8_t type, int8_t gain, float vref)
+{
+    float acc = 0.0f;
+
+    for (int i = 0; i < FAST_ZERO_AVG_SAMPLES; ++i) {
+        acc += ads1219_measure_fast((uint8_t)type, (uint8_t)gain, vref, ADS1219_VREF_EXTERNAL);
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+
+    return acc / (float)FAST_ZERO_AVG_SAMPLES;
+}
+
 static float calibration_average_zero(void)
 {
     float acc = 0.0f;
 
     for (int i = 0; i < CAL_STAGE_MEASUREMENTS; ++i) {
-        acc += set_zero(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, VREF_EXT);
-        vTaskDelay(pdMS_TO_TICKS(20));
+        acc += set_zero_fast(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, VREF_EXT);
+        vTaskDelay(pdMS_TO_TICKS(4));
     }
 
     return acc / (float)CAL_STAGE_MEASUREMENTS;
@@ -254,14 +300,14 @@ static float calibration_average_point(void)
     float acc = 0.0f;
 
     for (int i = 0; i < CAL_STAGE_MEASUREMENTS; ++i) {
-        const float relative = ads1219_measure(
+        const float relative = ads1219_measure_fast(
             ADS1219_MEAS_SINGLE_2,
             ADS1219_GAIN_4,
             VREF_EXT,
             ADS1219_VREF_EXTERNAL
         );
         acc += calculate_load_signal(g_calibration_zero, relative);
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(4));
     }
 
     return acc / (float)CAL_STAGE_MEASUREMENTS;
@@ -272,13 +318,13 @@ static float sensor_average_voltage(void)
     float acc = 0.0f;
 
     for (int i = 0; i < CAL_STAGE_MEASUREMENTS; ++i) {
-        acc += ads1219_measure(
+        acc += ads1219_measure_fast(
             ADS1219_MEAS_DIFF_01,
             ADS1219_GAIN_1,
             VREF_EXT,
             ADS1219_VREF_EXTERNAL
         );
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(4));
     }
 
     return acc / (float)CAL_STAGE_MEASUREMENTS;
@@ -1153,10 +1199,13 @@ static esp_err_t load_preview_tare(float *zero_voltage_out)
 static esp_err_t load_preview_read(float *measured_voltage_out, float *signal_voltage_out, float *mass_kg_out)
 {
     if (!g_preview_zero_valid) {
-        return ESP_ERR_INVALID_STATE;
+        const esp_err_t tare_err = load_preview_tare(NULL);
+        if (tare_err != ESP_OK) {
+            return tare_err;
+        }
     }
 
-    const float measured_voltage = ads1219_measure(
+    const float measured_voltage = ads1219_measure_fast(
         ADS1219_MEAS_SINGLE_2,
         ADS1219_GAIN_4,
         VREF_EXT,

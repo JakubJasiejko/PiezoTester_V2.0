@@ -416,24 +416,14 @@ class CalibrationDialog(QDialog):
         self.status_label.setWordWrap(True)
         load_layout.addWidget(self.status_label)
 
-        preview_buttons = QHBoxLayout()
-        self.tare_btn = QPushButton("Ustaw zero podgladu")
-        self.tare_btn.clicked.connect(self.run_load_tare)
-        preview_buttons.addWidget(self.tare_btn)
-        preview_buttons.addStretch(1)
-        load_layout.addLayout(preview_buttons)
-
         buttons = QHBoxLayout()
-        self.start_btn = QPushButton("Start kalibracji 1-punktowej")
-        self.start_btn.clicked.connect(self.start_calibration)
-        self.save_btn = QPushButton("Zapisz krok")
-        self.save_btn.clicked.connect(self.save_step)
+        self.primary_btn = QPushButton("Kalibracja 1-punktowa")
+        self.primary_btn.clicked.connect(self.handle_primary_action)
         self.advanced_btn = QPushButton("Kalibracja zaawansowana")
         self.advanced_btn.clicked.connect(self.open_advanced_calibration)
         cancel_btn = QPushButton("Anuluj")
         cancel_btn.clicked.connect(self.reject)
-        buttons.addWidget(self.start_btn)
-        buttons.addWidget(self.save_btn)
+        buttons.addWidget(self.primary_btn)
         buttons.addWidget(self.advanced_btn)
         buttons.addStretch(1)
         buttons.addWidget(cancel_btn)
@@ -474,8 +464,8 @@ class CalibrationDialog(QDialog):
         self.refresh_sensor_status()
         self.preview_timer = QTimer(self)
         self.preview_timer.timeout.connect(self.process_preview_cycle)
-        self.preview_timer.start(1000)
-        QTimer.singleShot(150, self.ensure_live_preview_started)
+        self.preview_timer.start(350)
+        QTimer.singleShot(50, self.ensure_live_preview_started)
 
     def set_step(self, step: int) -> None:
         self.step = step
@@ -487,14 +477,17 @@ class CalibrationDialog(QDialog):
                 "ESP32 wylicza mase z tego modelu, a opcjonalna kalibracja 1-punktowa koryguje skale.\n"
                 "Procedura: 1. zdejmij obciazenie i zapisz zero, 2. poloz znana mase i zapisz punkt."
             )
-            self.status_label.setText("Kliknij Start, aby rozpoczac kalibracje 1-punktowa.")
-            self.save_btn.setEnabled(False)
+            self.status_label.setText("Po wejsciu do okna urzadzenie samo ustawia zero podgladu i uruchamia ciagly pomiar masy.")
+            self.primary_btn.setText("Kalibracja 1-punktowa")
         elif step == 1:
-            self.status_label.setText("Krok 1/2: ZDEJMIJ OBCIAZENIE i kliknij Zapisz krok, aby zapisac zero.")
+            self.status_label.setText("Krok 1/2: ZDEJMIJ OBCIAZENIE i kliknij Nastepny krok, aby zapisac zero kalibracyjne.")
+            self.primary_btn.setText("Nastepny krok")
         elif step == 2:
-            self.status_label.setText("Krok 2/2: POLOZ MASE WZORCOWA, wpisz jej wartosc i kliknij Zapisz krok.")
+            self.status_label.setText("Krok 2/2: POLOZ MASE WZORCOWA, wpisz jej wartosc i kliknij Nastepny krok.")
+            self.primary_btn.setText("Nastepny krok")
         elif step == 99:
             self.status_label.setText("Zapisywanie kalibracji...")
+            self.primary_btn.setText("Przetwarzanie...")
 
     def set_busy(self, busy: bool) -> None:
         self.busy = busy
@@ -502,10 +495,8 @@ class CalibrationDialog(QDialog):
 
     def refresh_button_states(self) -> None:
         controls_locked = self.busy or self.preview_busy
-        self.start_btn.setEnabled(self.step == 0 and not controls_locked and not self.finished)
-        self.save_btn.setEnabled(self.step in (1, 2) and not controls_locked and not self.finished)
+        self.primary_btn.setEnabled(self.step in (0, 1, 2) and not controls_locked and not self.finished)
         self.sensor_calibrate_btn.setEnabled(not controls_locked)
-        self.tare_btn.setEnabled(not controls_locked)
         self.advanced_btn.setEnabled(not controls_locked)
         self.reference_mass_edit.setEnabled(self.step in (0, 2) and not controls_locked and not self.finished)
 
@@ -555,9 +546,9 @@ class CalibrationDialog(QDialog):
 
     def resume_preview(self) -> None:
         self.preview_suspended = False
-        self.preview_timer.start(1000)
+        self.preview_timer.start(350)
         self.refresh_button_states()
-        QTimer.singleShot(150, self.ensure_live_preview_started)
+        QTimer.singleShot(50, self.ensure_live_preview_started)
 
     def start_load_tare(self, background: bool, auto: bool = False) -> None:
         if self.preview_busy or self.busy or self.preview_suspended:
@@ -653,12 +644,6 @@ class CalibrationDialog(QDialog):
 
         self.update_live_preview_labels(preview)
 
-    def run_load_tare(self) -> None:
-        if self.busy or self.preview_busy:
-            return
-
-        self.start_load_tare(background=True, auto=False)
-
     def start_calibration(self) -> None:
         try:
             self.set_busy(True)
@@ -668,6 +653,12 @@ class CalibrationDialog(QDialog):
             QMessageBox.critical(self, "Kalibracja", str(exc))
         finally:
             self.set_busy(False)
+
+    def handle_primary_action(self) -> None:
+        if self.step == 0:
+            self.start_calibration()
+            return
+        self.save_step()
 
     def save_step(self) -> None:
         if self.busy or self.finished:
@@ -683,7 +674,7 @@ class CalibrationDialog(QDialog):
                 QApplication.processEvents()
                 self.app.run_calibration_zero()
                 self.set_step(2)
-                self.preview_message = "Zero kalibracyjne zapisane. Poloz znana mase i obserwuj aktualna wartosc."
+                self.preview_message = "Zero kalibracyjne zapisane. Poloz znana mase i obserwuj ciagly pomiar aktualnej masy."
                 self.resume_preview()
                 self.refresh_live_preview(force=True)
                 return
