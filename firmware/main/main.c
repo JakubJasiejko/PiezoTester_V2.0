@@ -28,7 +28,7 @@ static const float LOAD_CELL_EXCITATION_V = 3.3f;
 static const float LOAD_CELL_HARDWARE_GAIN = 62.0f;
 static const uint8_t LOAD_CALIBRATION_VERSION = 2;
 static const uint8_t ELECTROMAGNET_MODEL_VERSION = 2;
-static const uint8_t ELECTROMAGNET_PREMODEL_VERSION = 1;
+static const uint8_t ELECTROMAGNET_PREMODEL_VERSION = 2;
 
 #define MOSFET_PIN GPIO_NUM_26
 #define MOSFET_ON_LEVEL 0
@@ -105,7 +105,8 @@ typedef struct {
 
 typedef struct {
     bool valid;
-    uint16_t threshold_duty;
+    uint16_t move_threshold_duty;
+    uint16_t contact_threshold_duty;
     float full_scale_mass_g;
 } electromagnet_premodel_t;
 
@@ -367,7 +368,8 @@ static void test_session_reset(void)
 static void electromagnet_premodel_reset_defaults(void)
 {
     g_electromagnet_premodel.valid = false;
-    g_electromagnet_premodel.threshold_duty = 0;
+    g_electromagnet_premodel.move_threshold_duty = 0;
+    g_electromagnet_premodel.contact_threshold_duty = 0;
     g_electromagnet_premodel.full_scale_mass_g = LOAD_CELL_CAPACITY_KG * 1000.0f;
 }
 
@@ -405,17 +407,37 @@ static float electromagnet_premodel_full_scale_mass_g(void)
     return LOAD_CELL_CAPACITY_KG * 1000.0f;
 }
 
-static uint16_t electromagnet_premodel_threshold_duty(void)
+static uint16_t electromagnet_premodel_clamp_duty(uint16_t duty)
+{
+    if (duty >= ELECTROMAGNET_PWM_MAX_DUTY) {
+        return (uint16_t)(ELECTROMAGNET_PWM_MAX_DUTY - 1U);
+    }
+
+    return duty;
+}
+
+static uint16_t electromagnet_premodel_move_duty(void)
 {
     if (!g_electromagnet_premodel.valid) {
         return 0;
     }
 
-    if (g_electromagnet_premodel.threshold_duty >= ELECTROMAGNET_PWM_MAX_DUTY) {
-        return (uint16_t)(ELECTROMAGNET_PWM_MAX_DUTY - 1U);
+    return electromagnet_premodel_clamp_duty(g_electromagnet_premodel.move_threshold_duty);
+}
+
+static uint16_t electromagnet_premodel_contact_duty(void)
+{
+    const uint16_t move_duty = electromagnet_premodel_move_duty();
+    if (!g_electromagnet_premodel.valid) {
+        return move_duty;
     }
 
-    return g_electromagnet_premodel.threshold_duty;
+    const uint16_t contact_duty = electromagnet_premodel_clamp_duty(g_electromagnet_premodel.contact_threshold_duty);
+    if (contact_duty < move_duty) {
+        return move_duty;
+    }
+
+    return contact_duty;
 }
 
 static esp_err_t save_electromagnet_premodel_to_nvs(void)
@@ -468,17 +490,23 @@ static esp_err_t load_electromagnet_premodel_from_nvs(void)
         return (err != ESP_OK) ? err : ESP_FAIL;
     }
 
-    if (g_electromagnet_premodel.threshold_duty >= ELECTROMAGNET_PWM_MAX_DUTY) {
-        g_electromagnet_premodel.threshold_duty = (uint16_t)(ELECTROMAGNET_PWM_MAX_DUTY - 1U);
+    g_electromagnet_premodel.move_threshold_duty =
+        electromagnet_premodel_clamp_duty(g_electromagnet_premodel.move_threshold_duty);
+    g_electromagnet_premodel.contact_threshold_duty =
+        electromagnet_premodel_clamp_duty(g_electromagnet_premodel.contact_threshold_duty);
+    if (g_electromagnet_premodel.contact_threshold_duty < g_electromagnet_premodel.move_threshold_duty) {
+        g_electromagnet_premodel.contact_threshold_duty = g_electromagnet_premodel.move_threshold_duty;
     }
 
     return ESP_OK;
 }
 
-static esp_err_t electromagnet_premodel_set(uint32_t threshold_duty, float full_scale_mass_g)
+static esp_err_t electromagnet_premodel_set(uint32_t move_threshold_duty, uint32_t contact_threshold_duty, float full_scale_mass_g)
 {
     if (
-        threshold_duty >= ELECTROMAGNET_PWM_MAX_DUTY ||
+        move_threshold_duty >= ELECTROMAGNET_PWM_MAX_DUTY ||
+        contact_threshold_duty >= ELECTROMAGNET_PWM_MAX_DUTY ||
+        contact_threshold_duty < move_threshold_duty ||
         !(full_scale_mass_g > 0.0f) ||
         !isfinite(full_scale_mass_g)
     ) {
@@ -486,7 +514,8 @@ static esp_err_t electromagnet_premodel_set(uint32_t threshold_duty, float full_
     }
 
     g_electromagnet_premodel.valid = true;
-    g_electromagnet_premodel.threshold_duty = (uint16_t)threshold_duty;
+    g_electromagnet_premodel.move_threshold_duty = (uint16_t)move_threshold_duty;
+    g_electromagnet_premodel.contact_threshold_duty = (uint16_t)contact_threshold_duty;
     g_electromagnet_premodel.full_scale_mass_g = full_scale_mass_g;
     return save_electromagnet_premodel_to_nvs();
 }
@@ -607,29 +636,29 @@ static void electromagnet_model_upsert_point(float mass_g, uint32_t pwm_duty)
 
 static float electromagnet_default_mass_per_duty(void)
 {
-    const uint32_t threshold_duty = electromagnet_premodel_threshold_duty();
-    const uint32_t usable_span = (threshold_duty < ELECTROMAGNET_PWM_MAX_DUTY)
-        ? (ELECTROMAGNET_PWM_MAX_DUTY - threshold_duty)
+    const uint32_t contact_duty = electromagnet_premodel_contact_duty();
+    const uint32_t usable_span = (contact_duty < ELECTROMAGNET_PWM_MAX_DUTY)
+        ? (ELECTROMAGNET_PWM_MAX_DUTY - contact_duty)
         : 1U;
     return electromagnet_premodel_full_scale_mass_g() / (float)usable_span;
 }
 
 static uint32_t electromagnet_default_pwm_for_mass(float target_mass_g)
 {
-    if (!(target_mass_g > 0.0f) || !isfinite(target_mass_g)) {
+    if (!(target_mass_g >= 0.0f) || !isfinite(target_mass_g)) {
         return 0;
     }
 
     const float full_scale_mass_g = electromagnet_premodel_full_scale_mass_g();
-    const uint32_t threshold_duty = electromagnet_premodel_threshold_duty();
-    const uint32_t usable_span = (threshold_duty < ELECTROMAGNET_PWM_MAX_DUTY)
-        ? (ELECTROMAGNET_PWM_MAX_DUTY - threshold_duty)
+    const uint32_t contact_duty = electromagnet_premodel_contact_duty();
+    const uint32_t usable_span = (contact_duty < ELECTROMAGNET_PWM_MAX_DUTY)
+        ? (ELECTROMAGNET_PWM_MAX_DUTY - contact_duty)
         : 1U;
 
-    float estimated = (float)threshold_duty;
+    float estimated = (float)contact_duty;
     if (target_mass_g >= full_scale_mass_g) {
         estimated = (float)ELECTROMAGNET_PWM_MAX_DUTY;
-    } else {
+    } else if (target_mass_g > 0.0f) {
         estimated += ((float)usable_span * target_mass_g) / full_scale_mass_g;
     }
 
@@ -644,7 +673,7 @@ static uint32_t electromagnet_default_pwm_for_mass(float target_mass_g)
 
 static uint32_t electromagnet_estimate_pwm_for_mass(float target_mass_g)
 {
-    if (!(target_mass_g > 0.0f) || !isfinite(target_mass_g)) {
+    if (!(target_mass_g >= 0.0f) || !isfinite(target_mass_g)) {
         return 0;
     }
 
@@ -655,14 +684,14 @@ static uint32_t electromagnet_estimate_pwm_for_mass(float target_mass_g)
     if (g_electromagnet_model.point_count == 1) {
         const float ref_mass = g_electromagnet_model.mass_g[0];
         const float ref_duty = (float)g_electromagnet_model.pwm_duty[0];
-        const float threshold_duty = (float)electromagnet_premodel_threshold_duty();
-        float duty_per_mass = ((float)ELECTROMAGNET_PWM_MAX_DUTY - threshold_duty) / electromagnet_premodel_full_scale_mass_g();
+        const float contact_duty = (float)electromagnet_premodel_contact_duty();
+        float duty_per_mass = ((float)ELECTROMAGNET_PWM_MAX_DUTY - contact_duty) / electromagnet_premodel_full_scale_mass_g();
 
-        if (ref_mass > 0.0f && ref_duty > threshold_duty) {
-            duty_per_mass = (ref_duty - threshold_duty) / ref_mass;
+        if (ref_mass > 0.0f && ref_duty > contact_duty) {
+            duty_per_mass = (ref_duty - contact_duty) / ref_mass;
         }
 
-        const float estimated = threshold_duty + target_mass_g * duty_per_mass;
+        const float estimated = contact_duty + target_mass_g * duty_per_mass;
         if (estimated <= 0.0f) {
             return 0;
         }
@@ -689,7 +718,7 @@ static uint32_t electromagnet_estimate_pwm_for_mass(float target_mass_g)
 
     float mass_a = 0.0f;
     float mass_b = first_mass;
-    float duty_a = (float)electromagnet_premodel_threshold_duty();
+    float duty_a = (float)electromagnet_premodel_contact_duty();
     float duty_b = (float)g_electromagnet_model.pwm_duty[0];
 
     if (target_mass_g > last_mass) {
@@ -717,18 +746,18 @@ static uint32_t electromagnet_estimate_pwm_for_mass(float target_mass_g)
 
 static float electromagnet_estimate_mass_per_duty(float target_mass_g, uint32_t pwm_duty, float measured_mass_g)
 {
-    const uint32_t threshold_duty = electromagnet_premodel_threshold_duty();
-    if (pwm_duty <= threshold_duty) {
+    const uint32_t contact_duty = electromagnet_premodel_contact_duty();
+    if (pwm_duty <= contact_duty) {
         return electromagnet_default_mass_per_duty();
     }
 
     if (measured_mass_g > 0.0f && isfinite(measured_mass_g)) {
-        return measured_mass_g / (float)(pwm_duty - threshold_duty);
+        return measured_mass_g / (float)(pwm_duty - contact_duty);
     }
 
     const uint32_t estimated_pwm = electromagnet_estimate_pwm_for_mass(target_mass_g);
-    if (estimated_pwm > threshold_duty && target_mass_g > 0.0f) {
-        return target_mass_g / (float)(estimated_pwm - threshold_duty);
+    if (estimated_pwm > contact_duty && target_mass_g > 0.0f) {
+        return target_mass_g / (float)(estimated_pwm - contact_duty);
     }
 
     return electromagnet_default_mass_per_duty();
@@ -1340,13 +1369,15 @@ static test_result_t run_test_once(void)
 static void send_status(void)
 {
     const float nominal_kg_per_v = load_cell_nominal_kg_per_v();
-    const float threshold_pct =
-        ((float)electromagnet_premodel_threshold_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY;
+    const float move_threshold_pct =
+        ((float)electromagnet_premodel_move_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY;
+    const float contact_threshold_pct =
+        ((float)electromagnet_premodel_contact_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY;
     writef(
         "STATUS calibrated=%d nominal_kg_per_v=%.9f kg_per_v=%.9f correction=%.9f "
         "cal_mass=%.6f nominal_mass=%.6f cal_signal=%.9f cal_zero=%.9f "
         "sensor_calibrated=%d sensor_factor=%.9f sensor_ref=%.6f sensor_raw=%.6f sensor_voltage=%.9f "
-        "mag_points=%u mag_pre_valid=%d mag_threshold=%u mag_threshold_pct=%.3f mag_full_scale_g=%.3f "
+        "mag_points=%u mag_pre_valid=%d mag_move=%u mag_move_pct=%.3f mag_contact=%u mag_contact_pct=%.3f mag_full_scale_g=%.3f "
         "test_active=%d test_mode=%u test_samples=%u test_index=%u",
         g_calibration.valid ? 1 : 0,
         nominal_kg_per_v,
@@ -1363,8 +1394,10 @@ static void send_status(void)
         g_sensor_calibration.measured_voltage,
         (unsigned)g_electromagnet_model.point_count,
         g_electromagnet_premodel.valid ? 1 : 0,
-        (unsigned)electromagnet_premodel_threshold_duty(),
-        threshold_pct,
+        (unsigned)electromagnet_premodel_move_duty(),
+        move_threshold_pct,
+        (unsigned)electromagnet_premodel_contact_duty(),
+        contact_threshold_pct,
         electromagnet_premodel_full_scale_mass_g(),
         g_test_session.active ? 1 : 0,
         (unsigned)g_test_session.mode,
@@ -1523,47 +1556,90 @@ static void handle_command(const char *line)
 
         electromagnet_pulse(duty, hold_ms);
         writef(
-            "MAG_PULSE_OK duty=%u pct=%.3f hold_ms=%u threshold=%u threshold_pct=%.3f",
+            "MAG_PULSE_OK duty=%u pct=%.3f hold_ms=%u move=%u move_pct=%.3f contact=%u contact_pct=%.3f",
             (unsigned)duty,
             ((float)duty * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY,
             (unsigned)hold_ms,
-            (unsigned)electromagnet_premodel_threshold_duty(),
-            ((float)electromagnet_premodel_threshold_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY
+            (unsigned)electromagnet_premodel_move_duty(),
+            ((float)electromagnet_premodel_move_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY,
+            (unsigned)electromagnet_premodel_contact_duty(),
+            ((float)electromagnet_premodel_contact_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY
         );
         return;
     }
 
     if (strncmp(line, "MAG_PREMODEL_SET", 16) == 0) {
+        uint32_t move_threshold_duty = 0;
+        uint32_t contact_threshold_duty = 0;
         uint32_t threshold_duty = 0;
+        float move_threshold_pct = 0.0f;
+        float contact_threshold_pct = 0.0f;
         float threshold_pct = 0.0f;
         float full_scale_mass_g = electromagnet_premodel_full_scale_mass_g();
+        const bool has_move = parse_u32_argument(line, "move", &move_threshold_duty);
+        const bool has_contact = parse_u32_argument(line, "contact", &contact_threshold_duty);
         const bool has_threshold = parse_u32_argument(line, "threshold", &threshold_duty);
+        const bool has_move_pct = parse_float_argument(line, "move_pct", &move_threshold_pct);
+        const bool has_contact_pct = parse_float_argument(line, "contact_pct", &contact_threshold_pct);
         const bool has_threshold_pct = parse_float_argument(line, "threshold_pct", &threshold_pct);
         parse_float_argument(line, "full_scale_g", &full_scale_mass_g);
 
-        if (!has_threshold && !has_threshold_pct) {
+        if (!has_move && !has_contact && !has_threshold && !has_move_pct && !has_contact_pct && !has_threshold_pct) {
             write_line("ERR mag_premodel_invalid_args");
             return;
         }
 
-        if (!has_threshold) {
+        if (!has_move && has_move_pct) {
+            if (move_threshold_pct < 0.0f || move_threshold_pct >= 100.0f) {
+                write_line("ERR mag_premodel_invalid_move_pct");
+                return;
+            }
+            move_threshold_duty = (uint32_t)lrintf((move_threshold_pct * (float)ELECTROMAGNET_PWM_MAX_DUTY) / 100.0f);
+        }
+
+        if (!has_contact && has_contact_pct) {
+            if (contact_threshold_pct < 0.0f || contact_threshold_pct >= 100.0f) {
+                write_line("ERR mag_premodel_invalid_contact_pct");
+                return;
+            }
+            contact_threshold_duty = (uint32_t)lrintf((contact_threshold_pct * (float)ELECTROMAGNET_PWM_MAX_DUTY) / 100.0f);
+        }
+
+        if (!has_contact && has_threshold) {
+            contact_threshold_duty = threshold_duty;
+        }
+
+        if (!has_contact && !has_contact_pct && has_threshold_pct) {
             if (threshold_pct < 0.0f || threshold_pct >= 100.0f) {
                 write_line("ERR mag_premodel_invalid_pct");
                 return;
             }
-            threshold_duty = (uint32_t)lrintf((threshold_pct * (float)ELECTROMAGNET_PWM_MAX_DUTY) / 100.0f);
+            contact_threshold_duty = (uint32_t)lrintf((threshold_pct * (float)ELECTROMAGNET_PWM_MAX_DUTY) / 100.0f);
         }
 
-        const esp_err_t err = electromagnet_premodel_set(threshold_duty, full_scale_mass_g);
+        if (!has_move && !has_move_pct) {
+            move_threshold_duty = contact_threshold_duty;
+        }
+        if (!has_contact && !has_contact_pct && !has_threshold && !has_threshold_pct) {
+            contact_threshold_duty = move_threshold_duty;
+        }
+
+        const esp_err_t err = electromagnet_premodel_set(
+            move_threshold_duty,
+            contact_threshold_duty,
+            full_scale_mass_g
+        );
         if (err != ESP_OK) {
             writef("ERR mag_premodel_set_failed code=%d", (int)err);
             return;
         }
 
         writef(
-            "MAG_PREMODEL_SET_OK valid=1 threshold=%u threshold_pct=%.3f full_scale_g=%.3f",
-            (unsigned)electromagnet_premodel_threshold_duty(),
-            ((float)electromagnet_premodel_threshold_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY,
+            "MAG_PREMODEL_SET_OK valid=1 move=%u move_pct=%.3f contact=%u contact_pct=%.3f full_scale_g=%.3f",
+            (unsigned)electromagnet_premodel_move_duty(),
+            ((float)electromagnet_premodel_move_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY,
+            (unsigned)electromagnet_premodel_contact_duty(),
+            ((float)electromagnet_premodel_contact_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY,
             electromagnet_premodel_full_scale_mass_g()
         );
         return;
@@ -1582,10 +1658,12 @@ static void handle_command(const char *line)
 
     if (strcmp(line, "MAG_PREMODEL_STATUS") == 0) {
         writef(
-            "MAG_PREMODEL valid=%d threshold=%u threshold_pct=%.3f full_scale_g=%.3f points=%u",
+            "MAG_PREMODEL valid=%d move=%u move_pct=%.3f contact=%u contact_pct=%.3f full_scale_g=%.3f points=%u",
             g_electromagnet_premodel.valid ? 1 : 0,
-            (unsigned)electromagnet_premodel_threshold_duty(),
-            ((float)electromagnet_premodel_threshold_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY,
+            (unsigned)electromagnet_premodel_move_duty(),
+            ((float)electromagnet_premodel_move_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY,
+            (unsigned)electromagnet_premodel_contact_duty(),
+            ((float)electromagnet_premodel_contact_duty() * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY,
             electromagnet_premodel_full_scale_mass_g(),
             (unsigned)g_electromagnet_model.point_count
         );
@@ -1694,7 +1772,7 @@ static void handle_command(const char *line)
     }
 
     if (strcmp(line, "HELP") == 0) {
-        write_line("OK commands=PING,STATUS,CAL_START,CAL_ZERO,CAL_POINT <kg>,CAL_SAVE,LOAD_TARE,LOAD_PREVIEW,SENSOR_CAL <ohm>,MAG_PULSE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_PREMODEL_SET threshold=<n>|threshold_pct=<x> [full_scale_g=<g>],MAG_PREMODEL_CLEAR,MAG_PREMODEL_STATUS,MAG_MODEL_CLEAR,TEST_SETUP mode=<standard|ramp> start_g=<g> end_g=<g> samples=<n>,TEST_NEXT,TEST_ABORT,TEST,HELP");
+        write_line("OK commands=PING,STATUS,CAL_START,CAL_ZERO,CAL_POINT <kg>,CAL_SAVE,LOAD_TARE,LOAD_PREVIEW,SENSOR_CAL <ohm>,MAG_PULSE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_PREMODEL_SET [move=<n>|move_pct=<x>] [contact=<n>|contact_pct=<x>] [threshold=<n>|threshold_pct=<x>] [full_scale_g=<g>],MAG_PREMODEL_CLEAR,MAG_PREMODEL_STATUS,MAG_MODEL_CLEAR,TEST_SETUP mode=<standard|ramp> start_g=<g> end_g=<g> samples=<n>,TEST_NEXT,TEST_ABORT,TEST,HELP");
         return;
     }
 
