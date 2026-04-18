@@ -529,6 +529,7 @@ class CalibrationDialog(QDialog):
 
                 if event == "tare_ok":
                     line = str(payload)
+                    self.app.log(line)
                     data = parse_key_value_line(line)
                     zero = float(data.get("zero", "0"))
                     self.preview_message = f"Podglad masy aktywny. Zero odniesienia: {zero:.9f} V"
@@ -592,7 +593,11 @@ class CalibrationDialog(QDialog):
 
         def worker() -> None:
             try:
-                line = self.app.run_load_tare()
+                line = self.app.client.request_line(
+                    "LOAD_TARE",
+                    ("LOAD_TARE_OK",),
+                    timeout=CALIBRATION_STAGE_TIMEOUT,
+                )
                 self.preview_queue.put(("tare_ok", generation, line))
             except Exception as exc:
                 self.preview_queue.put(("tare_err", generation, str(exc)))
@@ -1119,7 +1124,11 @@ class AdvancedCalibrationDialog(QDialog):
                 while current_pct <= end_pct + 1e-9:
                     if self.curve_stop_requested:
                         break
-                    line = self.app.run_magnet_measure(current_pct, hold_ms)
+                    line = self.app.client.request_line(
+                        f"MAG_MEASURE pct={current_pct:.3f} hold_ms={hold_ms}",
+                        ("MAG_MEASURE_OK",),
+                        timeout=max(CALIBRATION_STAGE_TIMEOUT, hold_ms / 1000.0 + 15.0),
+                    )
                     self.worker_queue.put(("curve_measurement", line))
                     current_pct = round(current_pct + step_pct, 6)
                 self.worker_queue.put(("curve_finished", None))
@@ -1139,6 +1148,7 @@ class AdvancedCalibrationDialog(QDialog):
                 event, payload = self.worker_queue.get_nowait()
                 if event == "curve_measurement":
                     line = str(payload)
+                    self.app.log(line)
                     measurement = self.app.parse_magnet_measurement(line)
                     self.append_curve_row(measurement)
                     self.curve_status_label.setText(
