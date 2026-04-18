@@ -634,6 +634,58 @@ static void electromagnet_model_upsert_point(float mass_g, uint32_t pwm_duty)
     save_electromagnet_model_to_nvs();
 }
 
+static test_result_t electromagnet_measure_pwm(uint32_t pwm_duty, uint32_t hold_ms, bool learn_point)
+{
+    if (hold_ms == 0U) {
+        hold_ms = ELECTROMAGNET_PULSE_DEFAULT_MS;
+    }
+
+    const uint32_t previous_settle_ms = ELECTROMAGNET_SETTLE_MS;
+    test_result_t result = {0};
+
+    result.mode = (uint8_t)TEST_MODE_RAMP;
+    result.target_mass_g = NAN;
+    result.pwm_duty = pwm_duty;
+    result.pwm_percent = ((float)pwm_duty * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY;
+    result.session_index = g_test_counter;
+
+    result.load_zero = set_zero(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, VREF_EXT);
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    electromagnet_apply_duty(pwm_duty);
+    vTaskDelay(pdMS_TO_TICKS(hold_ms));
+
+    result.load_relative = ads1219_measure(
+        ADS1219_MEAS_SINGLE_2,
+        ADS1219_GAIN_4,
+        VREF_EXT,
+        ADS1219_VREF_EXTERNAL
+    );
+    vTaskDelay(pdMS_TO_TICKS(10));
+    result.load_voltage = calculate_load_signal(result.load_zero, result.load_relative);
+    result.mass_kg = calculate_load(result.load_voltage);
+    result.mass_g = result.mass_kg * 1000.0f;
+
+    result.sensor_voltage = ads1219_measure(
+        ADS1219_MEAS_DIFF_01,
+        ADS1219_GAIN_1,
+        VREF_EXT,
+        ADS1219_VREF_EXTERNAL
+    );
+    vTaskDelay(pdMS_TO_TICKS(10));
+    result.sensor_resistance = calculate_resistance(result.sensor_voltage);
+
+    electromagnet_off();
+    vTaskDelay(pdMS_TO_TICKS(ELECTROMAGNET_COOLDOWN_MS));
+
+    if (learn_point) {
+        electromagnet_model_upsert_point(result.mass_g, pwm_duty);
+    }
+
+    (void)previous_settle_ms;
+    return result;
+}
+
 static float electromagnet_default_mass_per_duty(void)
 {
     const uint32_t contact_duty = electromagnet_premodel_contact_duty();
@@ -1682,6 +1734,53 @@ static void handle_command(const char *line)
         return;
     }
 
+    if (strncmp(line, "MAG_MEASURE", 11) == 0) {
+        uint32_t duty = 0;
+        uint32_t hold_ms = ELECTROMAGNET_PULSE_DEFAULT_MS;
+        float pct = 0.0f;
+        const bool has_duty = parse_u32_argument(line, "duty", &duty);
+        const bool has_pct = parse_float_argument(line, "pct", &pct);
+        parse_u32_argument(line, "hold_ms", &hold_ms);
+
+        if (!has_duty && !has_pct) {
+            write_line("ERR mag_measure_invalid_args");
+            return;
+        }
+
+        if (!has_duty) {
+            if (pct < 0.0f || pct > 100.0f) {
+                write_line("ERR mag_measure_invalid_pct");
+                return;
+            }
+            duty = (uint32_t)lrintf((pct * (float)ELECTROMAGNET_PWM_MAX_DUTY) / 100.0f);
+        }
+
+        if (duty > ELECTROMAGNET_PWM_MAX_DUTY) {
+            write_line("ERR mag_measure_invalid_duty");
+            return;
+        }
+
+        if (g_test_session.active) {
+            test_session_abort();
+        }
+
+        const test_result_t result = electromagnet_measure_pwm(duty, hold_ms, true);
+        writef(
+            "MAG_MEASURE_OK pwm=%u pwm_pct=%.3f hold_ms=%u load_v=%.9f zero_v=%.9f relative_v=%.9f mass_g=%.3f resistance=%.3f sensor_v=%.9f points=%u",
+            (unsigned)result.pwm_duty,
+            result.pwm_percent,
+            (unsigned)hold_ms,
+            result.load_voltage,
+            result.load_zero,
+            result.load_relative,
+            result.mass_g,
+            result.sensor_resistance,
+            result.sensor_voltage,
+            (unsigned)g_electromagnet_model.point_count
+        );
+        return;
+    }
+
     if (strncmp(line, "TEST_SETUP ", 11) == 0) {
         char mode_text[16] = {0};
         float start_g = 0.0f;
@@ -1772,7 +1871,7 @@ static void handle_command(const char *line)
     }
 
     if (strcmp(line, "HELP") == 0) {
-        write_line("OK commands=PING,STATUS,CAL_START,CAL_ZERO,CAL_POINT <kg>,CAL_SAVE,LOAD_TARE,LOAD_PREVIEW,SENSOR_CAL <ohm>,MAG_PULSE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_PREMODEL_SET [move=<n>|move_pct=<x>] [contact=<n>|contact_pct=<x>] [threshold=<n>|threshold_pct=<x>] [full_scale_g=<g>],MAG_PREMODEL_CLEAR,MAG_PREMODEL_STATUS,MAG_MODEL_CLEAR,TEST_SETUP mode=<standard|ramp> start_g=<g> end_g=<g> samples=<n>,TEST_NEXT,TEST_ABORT,TEST,HELP");
+        write_line("OK commands=PING,STATUS,CAL_START,CAL_ZERO,CAL_POINT <kg>,CAL_SAVE,LOAD_TARE,LOAD_PREVIEW,SENSOR_CAL <ohm>,MAG_PULSE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_MEASURE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_PREMODEL_SET [move=<n>|move_pct=<x>] [contact=<n>|contact_pct=<x>] [threshold=<n>|threshold_pct=<x>] [full_scale_g=<g>],MAG_PREMODEL_CLEAR,MAG_PREMODEL_STATUS,MAG_MODEL_CLEAR,TEST_SETUP mode=<standard|ramp> start_g=<g> end_g=<g> samples=<n>,TEST_NEXT,TEST_ABORT,TEST,HELP");
         return;
     }
 

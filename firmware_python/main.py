@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QGraphicsScene,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -64,6 +65,13 @@ class CalibrationStatus:
     sensor_ref: float = 0.0
     sensor_raw: float = 0.0
     sensor_voltage: float = 0.0
+    mag_points: int = 0
+    mag_pre_valid: bool = False
+    mag_move: int = 0
+    mag_move_pct: float = 0.0
+    mag_contact: int = 0
+    mag_contact_pct: float = 0.0
+    mag_full_scale_g: float = 0.0
 
 
 @dataclass
@@ -73,6 +81,20 @@ class LoadPreview:
     signal: float
     mass_kg: float
     mass_g: float
+
+
+@dataclass
+class MagnetMeasurement:
+    pwm_duty: int
+    pwm_percent: float
+    hold_ms: int
+    load_v: float
+    zero_v: float
+    relative_v: float
+    mass_g: float
+    resistance: float
+    sensor_v: float
+    points: int
 
 
 @dataclass
@@ -404,10 +426,13 @@ class CalibrationDialog(QDialog):
         self.start_btn.clicked.connect(self.start_calibration)
         self.save_btn = QPushButton("Zapisz krok")
         self.save_btn.clicked.connect(self.save_step)
+        self.advanced_btn = QPushButton("Kalibracja zaawansowana")
+        self.advanced_btn.clicked.connect(self.open_advanced_calibration)
         cancel_btn = QPushButton("Anuluj")
         cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(self.start_btn)
         buttons.addWidget(self.save_btn)
+        buttons.addWidget(self.advanced_btn)
         buttons.addStretch(1)
         buttons.addWidget(cancel_btn)
         load_layout.addLayout(buttons)
@@ -479,6 +504,7 @@ class CalibrationDialog(QDialog):
         self.save_btn.setEnabled(self.step in (1, 2) and not controls_locked and not self.finished)
         self.sensor_calibrate_btn.setEnabled(not controls_locked)
         self.tare_btn.setEnabled(not controls_locked)
+        self.advanced_btn.setEnabled(not controls_locked)
         self.reference_mass_edit.setEnabled(self.step in (0, 2) and not controls_locked and not self.finished)
 
     def process_preview_cycle(self) -> None:
@@ -706,6 +732,401 @@ class CalibrationDialog(QDialog):
             QMessageBox.critical(self, "Kalibracja toru czujnika", str(exc))
         finally:
             self.set_busy(False)
+
+    def open_advanced_calibration(self) -> None:
+        if self.busy or self.preview_busy:
+            return
+        self.app.fetch_status()
+        dialog = AdvancedCalibrationDialog(self.app)
+        dialog.exec()
+        self.app.fetch_status()
+        self.refresh_sensor_status()
+        self.refresh_live_preview(force=True)
+
+
+class AdvancedCalibrationDialog(QDialog):
+    def __init__(self, app: "PiezoTesterWindow") -> None:
+        super().__init__(app)
+        self.app = app
+        self.setWindowTitle("Kalibracja zaawansowana")
+        self.setModal(True)
+        self.resize(980, 760)
+
+        self.worker_queue: queue.Queue[tuple[str, object]] = queue.Queue()
+        self.curve_running = False
+        self.curve_stop_requested = False
+
+        layout = QVBoxLayout(self)
+
+        intro = QLabel(
+            "Tutaj mozesz skalibrowac elektromagnes i krzywa obciazenia bez terminala.\n"
+            "Kalibracja kontaktu pozwala zapisac progi elektromagnesu, a automat krzywej obciazenia "
+            "mierzy belke dla kolejnych PWM i zapisuje punkty modelu w ESP32."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self.overview_label = QLabel()
+        self.overview_label.setWordWrap(True)
+        layout.addWidget(self.overview_label)
+
+        contact_group = QGroupBox("Kalibracja elektromagnesu")
+        contact_layout = QVBoxLayout(contact_group)
+
+        contact_hint = QLabel(
+            "Zacznij od 90% i wysylaj impulsy. Po obserwacji zaznacz, czy elektromagnes dotknal probki. "
+            "Gdy trafisz punkt kontaktu, zapisz progi do ESP32."
+        )
+        contact_hint.setWordWrap(True)
+        contact_layout.addWidget(contact_hint)
+
+        contact_form = QFormLayout()
+        self.contact_current_pct_spin = QDoubleSpinBox()
+        self.contact_current_pct_spin.setRange(0.0, 100.0)
+        self.contact_current_pct_spin.setDecimals(1)
+        self.contact_current_pct_spin.setSingleStep(0.1)
+        self.contact_current_pct_spin.setSuffix(" %")
+        contact_form.addRow("Aktualny PWM", self.contact_current_pct_spin)
+
+        self.contact_step_pct_spin = QDoubleSpinBox()
+        self.contact_step_pct_spin.setRange(0.1, 5.0)
+        self.contact_step_pct_spin.setDecimals(1)
+        self.contact_step_pct_spin.setSingleStep(0.1)
+        self.contact_step_pct_spin.setValue(0.5)
+        self.contact_step_pct_spin.setSuffix(" %")
+        contact_form.addRow("Krok PWM", self.contact_step_pct_spin)
+
+        self.contact_hold_ms_spin = QSpinBox()
+        self.contact_hold_ms_spin.setRange(200, 10000)
+        self.contact_hold_ms_spin.setSingleStep(100)
+        self.contact_hold_ms_spin.setValue(2000)
+        self.contact_hold_ms_spin.setSuffix(" ms")
+        contact_form.addRow("Czas impulsu", self.contact_hold_ms_spin)
+
+        self.move_threshold_pct_spin = QDoubleSpinBox()
+        self.move_threshold_pct_spin.setRange(0.0, 100.0)
+        self.move_threshold_pct_spin.setDecimals(3)
+        self.move_threshold_pct_spin.setSingleStep(0.1)
+        self.move_threshold_pct_spin.setSuffix(" %")
+        contact_form.addRow("Prog ruchu", self.move_threshold_pct_spin)
+
+        self.contact_threshold_pct_spin = QDoubleSpinBox()
+        self.contact_threshold_pct_spin.setRange(0.0, 100.0)
+        self.contact_threshold_pct_spin.setDecimals(3)
+        self.contact_threshold_pct_spin.setSingleStep(0.1)
+        self.contact_threshold_pct_spin.setSuffix(" %")
+        contact_form.addRow("Prog kontaktu", self.contact_threshold_pct_spin)
+
+        self.full_scale_mass_spin = QDoubleSpinBox()
+        self.full_scale_mass_spin.setRange(1.0, 50000.0)
+        self.full_scale_mass_spin.setDecimals(1)
+        self.full_scale_mass_spin.setSingleStep(50.0)
+        self.full_scale_mass_spin.setSuffix(" g")
+        contact_form.addRow("Pelna skala modelu", self.full_scale_mass_spin)
+        contact_layout.addLayout(contact_form)
+
+        self.contact_status_label = QLabel()
+        self.contact_status_label.setWordWrap(True)
+        contact_layout.addWidget(self.contact_status_label)
+
+        contact_buttons = QHBoxLayout()
+        self.contact_pulse_btn = QPushButton("Wyslij impuls")
+        self.contact_pulse_btn.clicked.connect(self.send_contact_pulse)
+        self.contact_no_btn = QPushButton("Nie dotknelo")
+        self.contact_no_btn.clicked.connect(self.mark_no_contact)
+        self.contact_yes_btn = QPushButton("Dotknelo probki")
+        self.contact_yes_btn.clicked.connect(self.mark_contact)
+        self.contact_save_btn = QPushButton("Zapisz progi do ESP32")
+        self.contact_save_btn.clicked.connect(self.save_contact_thresholds)
+        contact_buttons.addWidget(self.contact_pulse_btn)
+        contact_buttons.addWidget(self.contact_no_btn)
+        contact_buttons.addWidget(self.contact_yes_btn)
+        contact_buttons.addWidget(self.contact_save_btn)
+        contact_layout.addLayout(contact_buttons)
+
+        layout.addWidget(contact_group)
+
+        curve_group = QGroupBox("Kalibracja krzywej obciazenia")
+        curve_layout = QVBoxLayout(curve_group)
+
+        curve_hint = QLabel(
+            "Automat bedzie kolejno ustawial PWM, mierzyl belke tensometryczna i zapisywal punkty modelu "
+            "PWM -> masa bezposrednio w ESP32."
+        )
+        curve_hint.setWordWrap(True)
+        curve_layout.addWidget(curve_hint)
+
+        curve_form = QFormLayout()
+        self.curve_start_pct_spin = QDoubleSpinBox()
+        self.curve_start_pct_spin.setRange(0.0, 100.0)
+        self.curve_start_pct_spin.setDecimals(3)
+        self.curve_start_pct_spin.setSingleStep(0.1)
+        self.curve_start_pct_spin.setSuffix(" %")
+        curve_form.addRow("PWM start", self.curve_start_pct_spin)
+
+        self.curve_end_pct_spin = QDoubleSpinBox()
+        self.curve_end_pct_spin.setRange(0.0, 100.0)
+        self.curve_end_pct_spin.setDecimals(3)
+        self.curve_end_pct_spin.setSingleStep(0.1)
+        self.curve_end_pct_spin.setValue(100.0)
+        self.curve_end_pct_spin.setSuffix(" %")
+        curve_form.addRow("PWM koniec", self.curve_end_pct_spin)
+
+        self.curve_step_pct_spin = QDoubleSpinBox()
+        self.curve_step_pct_spin.setRange(0.05, 10.0)
+        self.curve_step_pct_spin.setDecimals(3)
+        self.curve_step_pct_spin.setSingleStep(0.05)
+        self.curve_step_pct_spin.setValue(0.5)
+        self.curve_step_pct_spin.setSuffix(" %")
+        curve_form.addRow("Krok", self.curve_step_pct_spin)
+
+        self.curve_hold_ms_spin = QSpinBox()
+        self.curve_hold_ms_spin.setRange(200, 10000)
+        self.curve_hold_ms_spin.setSingleStep(100)
+        self.curve_hold_ms_spin.setValue(2000)
+        self.curve_hold_ms_spin.setSuffix(" ms")
+        curve_form.addRow("Czas pomiaru", self.curve_hold_ms_spin)
+        curve_layout.addLayout(curve_form)
+
+        self.curve_status_label = QLabel()
+        self.curve_status_label.setWordWrap(True)
+        curve_layout.addWidget(self.curve_status_label)
+
+        curve_buttons = QHBoxLayout()
+        self.curve_clear_btn = QPushButton("Wyczysc model PWM->masa")
+        self.curve_clear_btn.clicked.connect(self.clear_curve_model)
+        self.curve_start_btn = QPushButton("Start automatu")
+        self.curve_start_btn.clicked.connect(self.start_curve_calibration)
+        self.curve_stop_btn = QPushButton("Zatrzymaj")
+        self.curve_stop_btn.clicked.connect(self.stop_curve_calibration)
+        curve_buttons.addWidget(self.curve_clear_btn)
+        curve_buttons.addWidget(self.curve_start_btn)
+        curve_buttons.addWidget(self.curve_stop_btn)
+        curve_layout.addLayout(curve_buttons)
+
+        self.curve_table = QTableWidget(0, 5)
+        self.curve_table.setHorizontalHeaderLabels(
+            ["PWM [%]", "Masa [g]", "Belka [V]", "Rezystancja", "Pkt modelu"]
+        )
+        self.curve_table.verticalHeader().setVisible(False)
+        self.curve_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.curve_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.curve_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.curve_table.setMinimumHeight(260)
+        curve_layout.addWidget(self.curve_table)
+
+        layout.addWidget(curve_group, 1)
+
+        close_row = QHBoxLayout()
+        close_row.addStretch(1)
+        self.close_btn = QPushButton("Zamknij")
+        self.close_btn.clicked.connect(self.accept)
+        close_row.addWidget(self.close_btn)
+        layout.addLayout(close_row)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.process_worker_queue)
+        self.timer.start(120)
+
+        self.sync_from_status()
+        self.refresh_ui_state()
+
+    def sync_from_status(self) -> None:
+        status = self.app.status
+        move_pct = status.mag_move_pct if status.mag_pre_valid else max(90.0, status.mag_contact_pct or 90.0)
+        contact_pct = status.mag_contact_pct if status.mag_pre_valid else max(move_pct, 95.5)
+        full_scale_g = status.mag_full_scale_g if status.mag_full_scale_g > 0 else 5000.0
+
+        self.contact_current_pct_spin.setValue(max(90.0, min(100.0, contact_pct)))
+        self.move_threshold_pct_spin.setValue(move_pct)
+        self.contact_threshold_pct_spin.setValue(contact_pct)
+        self.full_scale_mass_spin.setValue(full_scale_g)
+        self.curve_start_pct_spin.setValue(max(90.0, min(100.0, contact_pct)))
+        self.update_status_labels()
+
+    def refresh_ui_state(self) -> None:
+        idle = not self.curve_running
+        for widget in (
+            self.contact_current_pct_spin,
+            self.contact_step_pct_spin,
+            self.contact_hold_ms_spin,
+            self.move_threshold_pct_spin,
+            self.contact_threshold_pct_spin,
+            self.full_scale_mass_spin,
+            self.contact_pulse_btn,
+            self.contact_no_btn,
+            self.contact_yes_btn,
+            self.contact_save_btn,
+            self.curve_start_pct_spin,
+            self.curve_end_pct_spin,
+            self.curve_step_pct_spin,
+            self.curve_hold_ms_spin,
+            self.curve_clear_btn,
+            self.curve_start_btn,
+            self.close_btn,
+        ):
+            widget.setEnabled(idle)
+        self.curve_stop_btn.setEnabled(self.curve_running)
+
+    def update_status_labels(self) -> None:
+        status = self.app.status
+        self.overview_label.setText(
+            "Aktualny model elektromagnesu: "
+            f"punkty PWM->masa={status.mag_points}, "
+            f"prog ruchu={status.mag_move_pct:.3f}%, "
+            f"prog kontaktu={status.mag_contact_pct:.3f}%, "
+            f"pelna skala={status.mag_full_scale_g:.1f} g"
+        )
+        self.contact_status_label.setText(
+            "Kontakt: uzyj 'Wyslij impuls', obserwuj elektromagnes i oznacz wynik. "
+            f"Biezacy kandydat kontaktu: {self.contact_threshold_pct_spin.value():.3f}%."
+        )
+        if self.curve_running:
+            self.curve_status_label.setText("Automat kalibracji krzywej pracuje...")
+        else:
+            self.curve_status_label.setText(
+                "Automat gotowy. Zaczynaj od progu kontaktu i stopniowo zblizaj sie do 100%."
+            )
+
+    def append_curve_row(self, measurement: MagnetMeasurement) -> None:
+        row = self.curve_table.rowCount()
+        self.curve_table.insertRow(row)
+        values = [
+            f"{measurement.pwm_percent:.3f}",
+            f"{measurement.mass_g:.3f}",
+            f"{measurement.load_v:.9f}",
+            f"{measurement.resistance:.3f}",
+            str(measurement.points),
+        ]
+        for column, value in enumerate(values):
+            item = QTableWidgetItem(value)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.curve_table.setItem(row, column, item)
+
+    def send_contact_pulse(self) -> None:
+        try:
+            line = self.app.run_magnet_pulse(
+                self.contact_current_pct_spin.value(),
+                self.contact_hold_ms_spin.value(),
+            )
+            self.contact_status_label.setText(
+                f"Impuls wyslany dla {self.contact_current_pct_spin.value():.3f}%.\n{line}"
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Kalibracja elektromagnesu", str(exc))
+
+    def mark_no_contact(self) -> None:
+        next_value = min(100.0, self.contact_current_pct_spin.value() + self.contact_step_pct_spin.value())
+        self.contact_current_pct_spin.setValue(next_value)
+        self.contact_status_label.setText(
+            f"Zapisano: nie dotknelo. Kolejna propozycja PWM: {next_value:.3f}%."
+        )
+
+    def mark_contact(self) -> None:
+        current_pct = self.contact_current_pct_spin.value()
+        self.contact_threshold_pct_spin.setValue(current_pct)
+        if self.move_threshold_pct_spin.value() <= 0.0:
+            self.move_threshold_pct_spin.setValue(current_pct)
+        self.contact_status_label.setText(
+            f"Zapisano kandydat progu kontaktu: {current_pct:.3f}%. Mozesz od razu zapisac go do ESP32."
+        )
+
+    def save_contact_thresholds(self) -> None:
+        move_pct = self.move_threshold_pct_spin.value()
+        contact_pct = self.contact_threshold_pct_spin.value()
+        if contact_pct < move_pct:
+            QMessageBox.critical(self, "Kalibracja elektromagnesu", "Prog kontaktu nie moze byc mniejszy od progu ruchu.")
+            return
+
+        try:
+            line = self.app.run_magnet_premodel_set(
+                move_pct=move_pct,
+                contact_pct=contact_pct,
+                full_scale_g=self.full_scale_mass_spin.value(),
+            )
+            self.app.fetch_status()
+            self.sync_from_status()
+            self.contact_status_label.setText(f"Zapisano progi elektromagnesu.\n{line}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Kalibracja elektromagnesu", str(exc))
+
+    def clear_curve_model(self) -> None:
+        try:
+            line = self.app.run_magnet_model_clear()
+            self.curve_table.setRowCount(0)
+            self.app.fetch_status()
+            self.sync_from_status()
+            self.curve_status_label.setText(f"Model PWM->masa wyczyszczony.\n{line}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Kalibracja krzywej obciazenia", str(exc))
+
+    def start_curve_calibration(self) -> None:
+        start_pct = self.curve_start_pct_spin.value()
+        end_pct = self.curve_end_pct_spin.value()
+        step_pct = self.curve_step_pct_spin.value()
+        hold_ms = self.curve_hold_ms_spin.value()
+
+        if end_pct < start_pct:
+            QMessageBox.critical(self, "Kalibracja krzywej obciazenia", "PWM koniec nie moze byc mniejszy od PWM start.")
+            return
+        if step_pct <= 0:
+            QMessageBox.critical(self, "Kalibracja krzywej obciazenia", "Krok PWM musi byc dodatni.")
+            return
+
+        self.curve_running = True
+        self.curve_stop_requested = False
+        self.refresh_ui_state()
+        self.curve_status_label.setText("Start automatu kalibracji krzywej...")
+        self.curve_table.setRowCount(0)
+
+        def worker() -> None:
+            current_pct = start_pct
+            try:
+                while current_pct <= end_pct + 1e-9:
+                    if self.curve_stop_requested:
+                        break
+                    line = self.app.run_magnet_measure(current_pct, hold_ms)
+                    self.worker_queue.put(("curve_measurement", line))
+                    current_pct = round(current_pct + step_pct, 6)
+                self.worker_queue.put(("curve_finished", None))
+            except Exception as exc:
+                self.worker_queue.put(("curve_error", exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def stop_curve_calibration(self) -> None:
+        if self.curve_running:
+            self.curve_stop_requested = True
+            self.curve_status_label.setText("Zatrzymywanie automatu po biezacym punkcie...")
+
+    def process_worker_queue(self) -> None:
+        try:
+            while True:
+                event, payload = self.worker_queue.get_nowait()
+                if event == "curve_measurement":
+                    line = str(payload)
+                    measurement = self.app.parse_magnet_measurement(line)
+                    self.append_curve_row(measurement)
+                    self.curve_status_label.setText(
+                        f"Zmierzono {measurement.pwm_percent:.3f}% -> {measurement.mass_g:.3f} g. "
+                        f"Punkty modelu: {measurement.points}."
+                    )
+                    self.app.fetch_status()
+                    self.update_status_labels()
+                elif event == "curve_finished":
+                    self.curve_running = False
+                    self.curve_stop_requested = False
+                    self.app.fetch_status()
+                    self.sync_from_status()
+                    self.refresh_ui_state()
+                    self.curve_status_label.setText("Automat kalibracji krzywej zakonczyl prace.")
+                elif event == "curve_error":
+                    self.curve_running = False
+                    self.curve_stop_requested = False
+                    self.refresh_ui_state()
+                    QMessageBox.critical(self, "Kalibracja krzywej obciazenia", str(payload))
+        except queue.Empty:
+            return
 
 
 class TrialSummaryDialog(QDialog):
@@ -1491,6 +1912,13 @@ class PiezoTesterWindow(QMainWindow):
                 sensor_ref=float(data.get("sensor_ref", "0")),
                 sensor_raw=float(data.get("sensor_raw", "0")),
                 sensor_voltage=float(data.get("sensor_voltage", "0")),
+                mag_points=int(data.get("mag_points", "0")),
+                mag_pre_valid=data.get("mag_pre_valid", "0") == "1",
+                mag_move=int(data.get("mag_move", "0")),
+                mag_move_pct=float(data.get("mag_move_pct", "0")),
+                mag_contact=int(data.get("mag_contact", "0")),
+                mag_contact_pct=float(data.get("mag_contact_pct", "0")),
+                mag_full_scale_g=float(data.get("mag_full_scale_g", "0")),
             )
             self.update_calibration_labels()
             self.log(line)
@@ -1594,6 +2022,56 @@ class PiezoTesterWindow(QMainWindow):
         )
         self.log(line)
         self.fetch_status()
+        return line
+
+    def run_magnet_pulse(self, pct: float, hold_ms: int) -> str:
+        line = self.client.request_line(
+            f"MAG_PULSE pct={pct:.3f} hold_ms={hold_ms}",
+            ("MAG_PULSE_OK",),
+            timeout=max(10.0, hold_ms / 1000.0 + 8.0),
+        )
+        self.log(line)
+        return line
+
+    def parse_magnet_measurement(self, line: str) -> MagnetMeasurement:
+        data = parse_key_value_line(line)
+        return MagnetMeasurement(
+            pwm_duty=int(float(data.get("pwm", "0"))),
+            pwm_percent=float(data.get("pwm_pct", "0")),
+            hold_ms=int(float(data.get("hold_ms", "0"))),
+            load_v=float(data.get("load_v", "0")),
+            zero_v=float(data.get("zero_v", "0")),
+            relative_v=float(data.get("relative_v", "0")),
+            mass_g=float(data.get("mass_g", "0")),
+            resistance=float(data.get("resistance", "0")),
+            sensor_v=float(data.get("sensor_v", "0")),
+            points=int(data.get("points", "0")),
+        )
+
+    def run_magnet_measure(self, pct: float, hold_ms: int) -> str:
+        line = self.client.request_line(
+            f"MAG_MEASURE pct={pct:.3f} hold_ms={hold_ms}",
+            ("MAG_MEASURE_OK",),
+            timeout=max(CALIBRATION_STAGE_TIMEOUT, hold_ms / 1000.0 + 15.0),
+        )
+        self.log(line)
+        return line
+
+    def run_magnet_premodel_set(self, move_pct: float, contact_pct: float, full_scale_g: float) -> str:
+        line = self.client.request_line(
+            (
+                f"MAG_PREMODEL_SET move_pct={move_pct:.3f} "
+                f"contact_pct={contact_pct:.3f} full_scale_g={full_scale_g:.3f}"
+            ),
+            ("MAG_PREMODEL_SET_OK",),
+            timeout=20.0,
+        )
+        self.log(line)
+        return line
+
+    def run_magnet_model_clear(self) -> str:
+        line = self.client.request_line("MAG_MODEL_CLEAR", ("MAG_MODEL_CLEAR_OK",), timeout=10.0)
+        self.log(line)
         return line
 
     def run_test_setup(self, settings: TestSettings) -> str:
@@ -1728,11 +2206,13 @@ class PiezoTesterWindow(QMainWindow):
             self.sensor_calibration_label.setText(
                 f"Czujnik: OK | x{self.status.sensor_factor:.6f} | "
                 f"R wzorcowy={self.status.sensor_ref:.3f} Ohm | "
-                f"R surowa={self.status.sensor_raw:.3f} Ohm"
+                f"R surowa={self.status.sensor_raw:.3f} Ohm | "
+                f"Elektromagnes: punkty={self.status.mag_points}, kontakt={self.status.mag_contact_pct:.3f}%"
             )
         else:
             self.sensor_calibration_label.setText(
-                f"Czujnik: tryb domyslny | aktywna korekcja x{self.status.sensor_factor:.6f}"
+                f"Czujnik: tryb domyslny | aktywna korekcja x{self.status.sensor_factor:.6f} | "
+                f"Elektromagnes: punkty={self.status.mag_points}, kontakt={self.status.mag_contact_pct:.3f}%"
             )
 
     def calculate_display_mass_g(self, load_v: float) -> float:
