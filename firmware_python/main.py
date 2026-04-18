@@ -72,6 +72,7 @@ class CalibrationStatus:
     mag_contact: int = 0
     mag_contact_pct: float = 0.0
     mag_full_scale_g: float = 0.0
+    mag_contact_states: str = ""
 
 
 @dataclass
@@ -985,6 +986,17 @@ class AdvancedCalibrationDialog(QDialog):
         contact_pct = status.mag_contact_pct if status.mag_pre_valid else max(move_pct, 95.5)
         full_scale_g = status.mag_full_scale_g if status.mag_full_scale_g > 0 else 5000.0
 
+        state_map = {
+            "0": "unknown",
+            "1": "no_contact",
+            "2": "moved",
+            "3": "contact",
+        }
+        self.contact_point_states = {}
+        for idx, pwm_pct in enumerate(self.contact_pwm_points):
+            state_code = status.mag_contact_states[idx] if idx < len(status.mag_contact_states) else "0"
+            self.contact_point_states[pwm_pct] = state_map.get(state_code, "unknown")
+
         self.move_threshold_pct_spin.setValue(move_pct)
         self.contact_threshold_pct_spin.setValue(contact_pct)
         self.full_scale_mass_spin.setValue(full_scale_g)
@@ -1075,13 +1087,11 @@ class AdvancedCalibrationDialog(QDialog):
         contact_pct = max(move_pct, contact_pct)
         return move_pct, contact_pct
 
-    def autosave_contact_thresholds(self) -> str:
-        move_pct, contact_pct = self.recompute_contact_thresholds()
-        self.move_threshold_pct_spin.setValue(move_pct)
-        self.contact_threshold_pct_spin.setValue(contact_pct)
-        line = self.app.run_magnet_premodel_set(
-            move_pct=move_pct,
-            contact_pct=contact_pct,
+    def autosave_contact_thresholds(self, pwm_pct: float) -> str:
+        self.recompute_contact_thresholds()
+        line = self.app.run_magnet_contact_point_set(
+            slot=self.contact_pwm_points.index(pwm_pct),
+            state=self.contact_point_states[pwm_pct],
             full_scale_g=self.full_scale_mass_spin.value(),
         )
         self.app.fetch_status()
@@ -1103,7 +1113,7 @@ class AdvancedCalibrationDialog(QDialog):
     def mark_contact_point(self, pwm_pct: float, state: str) -> None:
         try:
             self.contact_point_states[pwm_pct] = state
-            line = self.autosave_contact_thresholds()
+            line = self.autosave_contact_thresholds(pwm_pct)
             state_label = {
                 "no_contact": "nie dotknelo",
                 "moved": "poruszyl sie",
@@ -1989,6 +1999,7 @@ class PiezoTesterWindow(QMainWindow):
                 mag_contact=int(data.get("mag_contact", "0")),
                 mag_contact_pct=float(data.get("mag_contact_pct", "0")),
                 mag_full_scale_g=float(data.get("mag_full_scale_g", "0")),
+                mag_contact_states=str(data.get("mag_contact_states", "")),
             )
             self.update_calibration_labels()
             self.log(line)
@@ -2136,6 +2147,20 @@ class PiezoTesterWindow(QMainWindow):
             ("MAG_PREMODEL_SET_OK",),
             timeout=20.0,
         )
+        self.log(line)
+        return line
+
+    def run_magnet_contact_point_set(self, slot: int, state: str, full_scale_g: float) -> str:
+        line = self.client.request_line(
+            f"MAG_CONTACT_POINT_SET slot={slot} state={state} full_scale_g={full_scale_g:.3f}",
+            ("MAG_CONTACT_POINT_SET_OK",),
+            timeout=20.0,
+        )
+        self.log(line)
+        return line
+
+    def run_magnet_contact_points_clear(self) -> str:
+        line = self.client.request_line("MAG_CONTACT_POINTS_CLEAR", ("MAG_CONTACT_POINTS_CLEAR_OK",), timeout=10.0)
         self.log(line)
         return line
 
