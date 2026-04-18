@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -76,6 +78,10 @@ class LoadPreview:
 @dataclass
 class TestResult:
     idx: int
+    mode: str
+    target_g: float
+    pwm_duty: int
+    pwm_percent: float
     load_v: float
     zero_v: float
     relative_v: float
@@ -83,6 +89,14 @@ class TestResult:
     resistance: float
     sensor_v: float
     created_at: datetime
+
+
+@dataclass
+class TestSettings:
+    mode: str
+    sample_count: int
+    start_mass_g: float = 0.0
+    end_mass_g: float = 0.0
 
 
 @dataclass
@@ -101,6 +115,7 @@ class TrialSummary:
     mass_stats: MetricStats | None
     resistance_stats: MetricStats | None
     csv_log_path: Path
+    test_settings: TestSettings | None = None
 
 
 class SerialProtocolError(RuntimeError):
@@ -228,6 +243,106 @@ class DeviceClient:
                 raise SerialProtocolError(line)
 
         raise SerialProtocolError(f"Timeout oczekiwania na odpowiedz: {expected_prefixes}")
+
+
+class TestSetupDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Parametry testu")
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+
+        hint = QLabel(
+            "Wybierz typ testu.\n"
+            "Standardowy wykonuje serie pomiarow z pelnym pobudzeniem elektromagnesu.\n"
+            "Narastajacy dobiera PWM, aby przejsc od obciazenia poczatkowego do koncowego i uczy sie charakterystyki elektromagnesu."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        form = QFormLayout()
+
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Standardowy", "standard")
+        self.mode_combo.addItem("Narastajacy", "ramp")
+        self.mode_combo.currentIndexChanged.connect(self.update_mode_state)
+        form.addRow("Typ testu", self.mode_combo)
+
+        self.sample_count_spin = QSpinBox()
+        self.sample_count_spin.setRange(1, 500)
+        self.sample_count_spin.setValue(10)
+        form.addRow("Ilosc probek", self.sample_count_spin)
+
+        self.start_mass_spin = QDoubleSpinBox()
+        self.start_mass_spin.setRange(0.0, 5000.0)
+        self.start_mass_spin.setDecimals(1)
+        self.start_mass_spin.setSingleStep(25.0)
+        self.start_mass_spin.setSuffix(" g")
+        self.start_mass_spin.setValue(100.0)
+        form.addRow("Obciazenie wstepne", self.start_mass_spin)
+
+        self.end_mass_spin = QDoubleSpinBox()
+        self.end_mass_spin.setRange(0.0, 5000.0)
+        self.end_mass_spin.setDecimals(1)
+        self.end_mass_spin.setSingleStep(25.0)
+        self.end_mass_spin.setSuffix(" g")
+        self.end_mass_spin.setValue(1000.0)
+        form.addRow("Obciazenie koncowe", self.end_mass_spin)
+
+        layout.addLayout(form)
+
+        self.mode_status_label = QLabel()
+        self.mode_status_label.setWordWrap(True)
+        layout.addWidget(self.mode_status_label)
+
+        buttons = QHBoxLayout()
+        start_btn = QPushButton("Start")
+        start_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Anuluj")
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addStretch(1)
+        buttons.addWidget(start_btn)
+        buttons.addWidget(cancel_btn)
+        layout.addLayout(buttons)
+
+        self.update_mode_state()
+
+    def update_mode_state(self) -> None:
+        is_ramp = self.mode_combo.currentData() == "ramp"
+        self.start_mass_spin.setEnabled(is_ramp)
+        self.end_mass_spin.setEnabled(is_ramp)
+
+        if is_ramp:
+            self.mode_status_label.setText(
+                "Tryb narastajacy: ESP32 wyliczy przyblizony PWM dla punktu poczatkowego i koncowego, "
+                "a potem bedzie dopasowywac charakterystyke elektromagnesu na podstawie rzeczywistych pomiarow."
+            )
+        else:
+            self.mode_status_label.setText(
+                "Tryb standardowy: seria klasycznych pomiarow z pelnym pobudzeniem elektromagnesu."
+            )
+
+    def settings(self) -> TestSettings:
+        mode = str(self.mode_combo.currentData())
+        start_mass_g = self.start_mass_spin.value() if mode == "ramp" else 0.0
+        end_mass_g = self.end_mass_spin.value() if mode == "ramp" else 0.0
+        return TestSettings(
+            mode=mode,
+            sample_count=self.sample_count_spin.value(),
+            start_mass_g=start_mass_g,
+            end_mass_g=end_mass_g,
+        )
+
+    def accept(self) -> None:
+        settings = self.settings()
+        if settings.sample_count <= 0:
+            QMessageBox.critical(self, "Test", "Ilosc probek musi byc wieksza od zera.")
+            return
+        if settings.mode == "ramp" and settings.end_mass_g < settings.start_mass_g:
+            QMessageBox.critical(self, "Test", "Obciazenie koncowe nie moze byc mniejsze od wstepnego.")
+            return
+        super().accept()
 
 
 class CalibrationDialog(QDialog):
@@ -597,6 +712,7 @@ class TrialSummaryDialog(QDialog):
     CHART_ITEMS = [
         (0, "Rezystancja / Nr probki"),
         (1, "Obciazenie / Nr probki"),
+        (2, "Rezystancja / Obciazenie"),
     ]
 
     def __init__(self, app: "PiezoTesterWindow", summary: TrialSummary, results: list[TestResult]) -> None:
@@ -703,6 +819,12 @@ class TrialSummaryDialog(QDialog):
         info_form.addRow("Data zakonczenia", QLabel(self.summary.finished_at.strftime("%Y-%m-%d %H:%M:%S")))
         info_form.addRow("Czas trwania", QLabel(format_duration(self.summary.started_at, self.summary.finished_at)))
         info_form.addRow("Liczba probek", QLabel(str(self.summary.sample_count)))
+        if self.summary.test_settings is not None:
+            settings = self.summary.test_settings
+            info_form.addRow("Typ testu", QLabel("Narastajacy" if settings.mode == "ramp" else "Standardowy"))
+            if settings.mode == "ramp":
+                info_form.addRow("Obciazenie wstepne", QLabel(f"{settings.start_mass_g:.1f} g"))
+                info_form.addRow("Obciazenie koncowe", QLabel(f"{settings.end_mass_g:.1f} g"))
 
         session_csv_label = QLabel(str(self.summary.csv_log_path))
         session_csv_label.setWordWrap(True)
@@ -1018,18 +1140,26 @@ class TrialSummaryDialog(QDialog):
                 f"Wygenerowano: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             )
 
-            ensure_space(170)
-            info_rect = QRect(margin, y, content_width, 140)
-            painter.setPen(QColor("#d1d5db"))
-            painter.setBrush(QColor("#f8fafc"))
-            painter.drawRoundedRect(info_rect, 10, 10)
-
             info_items = [
                 ("Data rozpoczecia", self.summary.started_at.strftime("%Y-%m-%d %H:%M:%S")),
                 ("Data zakonczenia", self.summary.finished_at.strftime("%Y-%m-%d %H:%M:%S")),
                 ("Czas trwania", format_duration(self.summary.started_at, self.summary.finished_at)),
                 ("Liczba probek", str(self.summary.sample_count)),
             ]
+            if self.summary.test_settings is not None:
+                settings = self.summary.test_settings
+                info_items.append(("Typ testu", "Narastajacy" if settings.mode == "ramp" else "Standardowy"))
+                if settings.mode == "ramp":
+                    info_items.append(("Obciazenie start", f"{settings.start_mass_g:.1f} g"))
+                    info_items.append(("Obciazenie koniec", f"{settings.end_mass_g:.1f} g"))
+
+            info_rows = max(1, (len(info_items) + 1) // 2)
+            info_height = 44 + info_rows * 48
+            ensure_space(info_height + 30)
+            info_rect = QRect(margin, y, content_width, info_height)
+            painter.setPen(QColor("#d1d5db"))
+            painter.setBrush(QColor("#f8fafc"))
+            painter.drawRoundedRect(info_rect, 10, 10)
 
             for index, (label, value) in enumerate(info_items):
                 col = index % 2
@@ -1043,7 +1173,7 @@ class TrialSummaryDialog(QDialog):
                 set_font(12, bold=True)
                 painter.drawText(x_pos, y_pos + 22, value)
 
-            y += 180
+            y += info_height + 24
 
             if report_comment:
                 ensure_space(96)
@@ -1191,6 +1321,7 @@ class ChartWindow(QMainWindow):
             [
                 "Rezystancja / Nr probki",
                 "Obciazenie / Nr probki",
+                "Rezystancja / Obciazenie",
             ]
         )
         self.chart_type_combo.currentIndexChanged.connect(self.refresh_chart)
@@ -1224,6 +1355,7 @@ class PiezoTesterWindow(QMainWindow):
         self.session_finished_at: datetime | None = None
         self.pending_summary_on_stop = False
         self.closing = False
+        self.current_test_settings: TestSettings | None = None
 
         self.port_combo = QComboBox()
         self.connection_label = QLabel("Niepolaczono")
@@ -1231,7 +1363,7 @@ class PiezoTesterWindow(QMainWindow):
         self.sensor_calibration_label = QLabel("Tor czujnika: korekcja domyslna")
         self.console = QPlainTextEdit()
         self.console.setReadOnly(True)
-        self.table = QTableWidget(0, 15)
+        self.table = QTableWidget(0, 18)
         self.test_button = QPushButton("Testuj")
         self.chart_button = QPushButton("Wykres")
         self.chart_window = ChartWindow(self)
@@ -1292,6 +1424,9 @@ class PiezoTesterWindow(QMainWindow):
                 "Data",
                 "Czas",
                 "Nr",
+                "Tryb",
+                "Cel [g]",
+                "PWM [%]",
                 "Masa [g]",
                 "Rezystancja",
                 "Belka [V]",
@@ -1366,30 +1501,27 @@ class PiezoTesterWindow(QMainWindow):
         if self.measurement_running:
             self.stop_measurement_loop()
         else:
-            self.open_test_confirmation()
+            self.open_test_setup_dialog()
 
-    def open_test_confirmation(self) -> None:
+    def open_test_setup_dialog(self) -> None:
         if not self.client.is_connected():
             QMessageBox.critical(self, "Test", "Najpierw polacz sie z urzadzeniem.")
             return
 
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Warning)
-        msg.setWindowTitle("Ostrzezenie")
-        msg.setText(
-            "ESP32 moze mierzyc mase juz z modelu nominalnego 5 kg / 2 mV/V / 3.3 V / x62.\n"
-            "Kalibracja belki jest opcjonalna, ale poprawia dokladnosc."
-        )
-        ok_button = msg.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
-        calibrate_button = msg.addButton("Kalibruj", QMessageBox.ButtonRole.ActionRole)
-        msg.addButton("Anuluj", QMessageBox.ButtonRole.RejectRole)
-        msg.exec()
+        dialog = TestSetupDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
 
-        clicked = msg.clickedButton()
-        if clicked is ok_button:
-            self.trigger_test()
-        elif clicked is calibrate_button:
-            self.open_calibration_dialog()
+        settings = dialog.settings()
+        if settings.mode == "ramp" and not self.calibration_is_usable():
+            QMessageBox.critical(
+                self,
+                "Test narastajacy",
+                "Tryb narastajacy wymaga poprawnego modelu masy. Najpierw sprawdz status i ewentualnie skalibruj belke.",
+            )
+            return
+
+        self.trigger_test(settings)
 
     def open_calibration_dialog(self) -> None:
         if not self.client.is_connected():
@@ -1464,37 +1596,75 @@ class PiezoTesterWindow(QMainWindow):
         self.fetch_status()
         return line
 
-    def start_new_session(self) -> None:
+    def run_test_setup(self, settings: TestSettings) -> str:
+        line = self.client.request_line(
+            (
+                f"TEST_SETUP mode={settings.mode} "
+                f"start_g={settings.start_mass_g:.3f} "
+                f"end_g={settings.end_mass_g:.3f} "
+                f"samples={settings.sample_count}"
+            ),
+            ("TEST_SETUP_OK",),
+            timeout=20.0,
+        )
+        return line
+
+    def abort_test_session(self) -> str:
+        return self.client.request_line("TEST_ABORT", ("TEST_ABORT_OK",), timeout=10.0)
+
+    def start_new_session(self, settings: TestSettings) -> None:
         self.results.clear()
         self.table.setRowCount(0)
         self.current_log_path = LOG_DIR / f"results_{datetime.now():%Y-%m-%d_%H-%M-%S}.csv"
         self.session_started_at = datetime.now()
         self.session_finished_at = None
         self.pending_summary_on_stop = False
+        self.current_test_settings = settings
         self.chart_window.refresh_chart()
 
-    def trigger_test(self) -> None:
+    def trigger_test(self, settings: TestSettings) -> None:
         if self.measurement_running:
             return
 
-        self.start_new_session()
+        self.start_new_session(settings)
         self.measurement_running = True
         self.stop_measurement_event.clear()
         self.test_button.setText("Przerwij")
 
         def worker() -> None:
-            while not self.stop_measurement_event.is_set():
-                try:
-                    line = self.client.request_line("TEST", ("TEST_RESULT",), timeout=20.0)
-                    self.ui_queue.put(("test_ok", line))
-                except Exception as exc:
-                    self.ui_queue.put(("test_err", exc))
-                    break
+            setup_done = False
+            try:
+                setup_line = self.run_test_setup(settings)
+                setup_done = True
+                self.ui_queue.put(("test_log", setup_line))
 
+                for _ in range(settings.sample_count):
+                    if self.stop_measurement_event.is_set():
+                        break
+
+                    line = self.client.request_line("TEST_NEXT", ("TEST_RESULT", "TEST_DONE"), timeout=90.0)
+                    if line.startswith("TEST_DONE"):
+                        break
+                    self.ui_queue.put(("test_ok", line))
+            except Exception as exc:
+                self.ui_queue.put(("test_err", exc))
+            finally:
+                if setup_done:
+                    try:
+                        abort_line = self.abort_test_session()
+                        self.ui_queue.put(("test_log", abort_line))
+                    except Exception:
+                        pass
             self.ui_queue.put(("test_stopped", None))
 
         threading.Thread(target=worker, daemon=True).start()
-        self.log("Uruchomiono nowa probe pomiarowa...")
+        if settings.mode == "ramp":
+            self.log(
+                f"Uruchomiono test narastajacy: start={settings.start_mass_g:.1f} g, "
+                f"koniec={settings.end_mass_g:.1f} g, probki={settings.sample_count}."
+            )
+        else:
+            self.log(f"Uruchomiono test standardowy: probki={settings.sample_count}.")
 
     def stop_measurement_loop(self) -> None:
         if not self.measurement_running:
@@ -1517,6 +1687,8 @@ class PiezoTesterWindow(QMainWindow):
                 event, payload = self.ui_queue.get_nowait()
                 if event == "test_ok":
                     self.handle_test_result(str(payload))
+                elif event == "test_log":
+                    self.log(str(payload))
                 elif event == "test_err":
                     self.pending_summary_on_stop = False
                     self.finalize_measurement_loop()
@@ -1581,19 +1753,27 @@ class PiezoTesterWindow(QMainWindow):
         all_cells = mass_cells + resistance_cells
 
         for row in range(self.table.rowCount()):
-            for offset, value in enumerate(all_cells, start=7):
+            for offset, value in enumerate(all_cells, start=10):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(row, offset, item)
 
     def handle_test_result(self, line: str) -> None:
         data = parse_key_value_line(line)
+        mode = data.get("mode", "standard")
+        target_g = float(data.get("target_g", "0"))
+        pwm_duty = int(float(data.get("pwm", "0")))
+        pwm_percent = float(data.get("pwm_pct", "0"))
         load_v = float(data["load_v"])
         mass_g = float(data.get("mass_g", "nan"))
         if not math.isfinite(mass_g) or mass_g < 0.0:
             mass_g = self.calculate_display_mass_g(load_v)
         result = TestResult(
             idx=len(self.results) + 1,
+            mode=mode,
+            target_g=target_g,
+            pwm_duty=pwm_duty,
+            pwm_percent=pwm_percent,
             load_v=load_v,
             zero_v=float(data["zero_v"]),
             relative_v=float(data["relative_v"]),
@@ -1610,10 +1790,13 @@ class PiezoTesterWindow(QMainWindow):
             result.created_at.strftime("%Y-%m-%d"),
             result.created_at.strftime("%H:%M:%S"),
             str(result.idx),
+            "Narast." if result.mode == "ramp" else "Std",
+            "-" if result.mode != "ramp" else f"{result.target_g:.1f}",
+            f"{result.pwm_percent:.2f}",
             "BLEDNA KAL" if math.isnan(result.mass_g) else f"{result.mass_g:.3f}",
-            f"{result.resistance:.3f}",
+            "BLEDNY ODCZYT" if math.isnan(result.resistance) else f"{result.resistance:.3f}",
             f"{result.load_v:.9f}",
-            f"{result.sensor_v:.9f}",
+            "BLEDNY ODCZYT" if math.isnan(result.sensor_v) else f"{result.sensor_v:.9f}",
             "",
             "",
             "",
@@ -1643,6 +1826,10 @@ class PiezoTesterWindow(QMainWindow):
                         "date",
                         "time",
                         "idx",
+                        "mode",
+                        "target_g",
+                        "pwm_duty",
+                        "pwm_pct",
                         "mass_g",
                         "resistance",
                         "load_v",
@@ -1656,6 +1843,10 @@ class PiezoTesterWindow(QMainWindow):
                     result.created_at.strftime("%Y-%m-%d"),
                     result.created_at.strftime("%H:%M:%S"),
                     result.idx,
+                    result.mode,
+                    "" if result.mode != "ramp" else f"{result.target_g:.3f}",
+                    result.pwm_duty,
+                    f"{result.pwm_percent:.6f}",
                     "" if math.isnan(result.mass_g) else f"{result.mass_g:.6f}",
                     f"{result.resistance:.6f}",
                     f"{result.load_v:.9f}",
@@ -1686,16 +1877,29 @@ class PiezoTesterWindow(QMainWindow):
 
         if mode == 0:
             chart.setTitle("Rezystancja czujnika od numeru probki")
-            points = [(result.idx, result.resistance) for result in results]
+            points = [(result.idx, result.resistance) for result in results if not math.isnan(result.resistance)]
             x_title = "Nr probki"
             y_title = "Rezystancja"
             reference_label = "Srednia rezystancja"
-        else:
+        elif mode == 1:
             chart.setTitle("Obciazenie od numeru probki")
             points = [(result.idx, result.mass_g) for result in results if not math.isnan(result.mass_g)]
             x_title = "Nr probki"
             y_title = "Obciazenie [g]"
             reference_label = "Srednie obciazenie"
+        else:
+            chart.setTitle("Rezystancja czujnika od obciazenia")
+            points = sorted(
+                [
+                    (result.mass_g, result.resistance)
+                    for result in results
+                    if not math.isnan(result.mass_g) and not math.isnan(result.resistance)
+                ],
+                key=lambda point: point[0],
+            )
+            x_title = "Obciazenie [g]"
+            y_title = "Rezystancja"
+            reference_label = "Srednia rezystancja"
 
         x_values = [x_val for x_val, _ in points]
         y_values = [y_val for _, y_val in points]
@@ -1789,6 +1993,7 @@ class PiezoTesterWindow(QMainWindow):
             mass_stats=self.mass_stats(),
             resistance_stats=self.resistance_stats(),
             csv_log_path=self.current_log_path,
+            test_settings=self.current_test_settings,
         )
 
     def open_trial_summary_dialog(self) -> None:
@@ -1810,6 +2015,11 @@ class PiezoTesterWindow(QMainWindow):
             writer.writerow(["Data zakonczenia", summary.finished_at.strftime("%Y-%m-%d %H:%M:%S")])
             writer.writerow(["Czas trwania", format_duration(summary.started_at, summary.finished_at)])
             writer.writerow(["Liczba probek", summary.sample_count])
+            if summary.test_settings is not None:
+                writer.writerow(["Typ testu", "ramp" if summary.test_settings.mode == "ramp" else "standard"])
+                if summary.test_settings.mode == "ramp":
+                    writer.writerow(["Obciazenie wstepne [g]", f"{summary.test_settings.start_mass_g:.3f}"])
+                    writer.writerow(["Obciazenie koncowe [g]", f"{summary.test_settings.end_mass_g:.3f}"])
             writer.writerow([])
             writer.writerow(["Statystyki"])
             writer.writerow(["Parametr", "Srednia", "Min", "Max", "Odch. std."])
@@ -1821,6 +2031,10 @@ class PiezoTesterWindow(QMainWindow):
                     "date",
                     "time",
                     "idx",
+                    "mode",
+                    "target_g",
+                    "pwm_duty",
+                    "pwm_pct",
                     "mass_g",
                     "resistance",
                     "load_v",
@@ -1836,6 +2050,10 @@ class PiezoTesterWindow(QMainWindow):
                         result.created_at.strftime("%Y-%m-%d"),
                         result.created_at.strftime("%H:%M:%S"),
                         result.idx,
+                        result.mode,
+                        "" if result.mode != "ramp" else f"{result.target_g:.6f}",
+                        result.pwm_duty,
+                        f"{result.pwm_percent:.6f}",
                         "" if math.isnan(result.mass_g) else f"{result.mass_g:.6f}",
                         f"{result.resistance:.6f}",
                         f"{result.load_v:.9f}",

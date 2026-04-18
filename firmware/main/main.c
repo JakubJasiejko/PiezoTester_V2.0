@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "esp_timer.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -26,10 +27,24 @@ static const float LOAD_CELL_SENSITIVITY_MV_V = 2.0f;
 static const float LOAD_CELL_EXCITATION_V = 3.3f;
 static const float LOAD_CELL_HARDWARE_GAIN = 62.0f;
 static const uint8_t LOAD_CALIBRATION_VERSION = 2;
+static const uint8_t ELECTROMAGNET_MODEL_VERSION = 2;
 
 #define MOSFET_PIN GPIO_NUM_26
 #define MOSFET_ON_LEVEL 0
 #define MOSFET_OFF_LEVEL 1
+
+#define ELECTROMAGNET_PWM_TIMER LEDC_TIMER_0
+#define ELECTROMAGNET_PWM_MODE LEDC_LOW_SPEED_MODE
+#define ELECTROMAGNET_PWM_CHANNEL LEDC_CHANNEL_0
+#define ELECTROMAGNET_PWM_FREQ_HZ 5000
+#define ELECTROMAGNET_PWM_RESOLUTION LEDC_TIMER_13_BIT
+#define ELECTROMAGNET_PWM_MAX_DUTY ((1U << 13) - 1U)
+#define ELECTROMAGNET_SETTLE_MS 1300
+#define ELECTROMAGNET_COOLDOWN_MS 300
+#define ELECTROMAGNET_TARGET_ATTEMPTS 3
+#define ELECTROMAGNET_POINT_TOLERANCE_G 60.0f
+#define ELECTROMAGNET_MIN_LEARNED_MASS_G 10.0f
+#define ELECTROMAGNET_MODEL_MAX_POINTS 16
 
 #define ZERO_AVG_SAMPLES 8
 #define AVG_SAMPLES 8
@@ -59,9 +74,19 @@ typedef struct {
     float load_relative;
     float mass_kg;
     float mass_g;
+    float target_mass_g;
     float sensor_voltage;
     float sensor_resistance;
+    uint32_t pwm_duty;
+    float pwm_percent;
+    uint32_t session_index;
+    uint8_t mode;
 } test_result_t;
+
+typedef enum {
+    TEST_MODE_STANDARD = 0,
+    TEST_MODE_RAMP = 1,
+} test_mode_t;
 
 typedef enum {
     CAL_STATE_IDLE = 0,
@@ -69,6 +94,23 @@ typedef enum {
     CAL_STATE_WAIT_POINT,
     CAL_STATE_READY_TO_SAVE,
 } calibration_state_t;
+
+typedef struct {
+    uint8_t point_count;
+    float mass_g[ELECTROMAGNET_MODEL_MAX_POINTS];
+    uint16_t pwm_duty[ELECTROMAGNET_MODEL_MAX_POINTS];
+} electromagnet_model_t;
+
+typedef struct {
+    bool active;
+    test_mode_t mode;
+    uint16_t sample_count;
+    uint16_t current_index;
+    float start_mass_g;
+    float end_mass_g;
+    uint32_t start_pwm_duty;
+    uint32_t end_pwm_duty;
+} test_session_t;
 
 static calibration_data_t g_calibration = {
     .valid = false,
@@ -90,6 +132,8 @@ static bool g_preview_zero_valid = false;
 static int g_calibration_points = 0;
 static uint32_t g_test_counter = 0;
 static calibration_state_t g_calibration_state = CAL_STATE_IDLE;
+static electromagnet_model_t g_electromagnet_model = {0};
+static test_session_t g_test_session = {0};
 
 static inline float calculate_load_signal(float zero_voltage, float measured_voltage);
 
@@ -143,18 +187,32 @@ static float ads1219_measure(uint8_t mux_sel, uint8_t gain_sel, float vref, uint
 
     const float gain = (gain_sel == ADS1219_GAIN_4) ? 4.0f : 1.0f;
     float sum = 0.0f;
+    bool skip_first_valid = true;
+    int valid_samples = 0;
 
-    for (int i = 0; i < AVG_SAMPLES + 1; ++i) {
+    for (int attempt = 0; attempt < (AVG_SAMPLES + 1) * 2 && valid_samples < AVG_SAMPLES; ++attempt) {
         ads1219_startSync(ADS1219_ADRESS);
         const int32_t raw = ads1219_read(ADS1219_ADRESS);
-
-        if (i > 0) {
-            const float voltage = (raw / 8388608.0f) * vref;
-            sum += voltage / gain;
+        if (raw == 0x7FFFFFFF) {
+            vTaskDelay(pdMS_TO_TICKS(2));
+            continue;
         }
+
+        if (skip_first_valid) {
+            skip_first_valid = false;
+            continue;
+        }
+
+        const float voltage = (raw / 8388608.0f) * vref;
+        sum += voltage / gain;
+        valid_samples++;
     }
 
-    return sum / AVG_SAMPLES;
+    if (valid_samples < (AVG_SAMPLES / 2)) {
+        return NAN;
+    }
+
+    return sum / (float)valid_samples;
 }
 
 static float set_zero(int8_t type, int8_t gain, float vref)
@@ -245,6 +303,272 @@ static inline float calculate_resistance_raw(float voltage)
 static inline float calculate_resistance(float voltage)
 {
     return calculate_resistance_raw(voltage) * g_sensor_calibration.factor;
+}
+
+static void electromagnet_apply_duty(uint32_t active_duty)
+{
+    if (active_duty > ELECTROMAGNET_PWM_MAX_DUTY) {
+        active_duty = ELECTROMAGNET_PWM_MAX_DUTY;
+    }
+
+    const uint32_t hardware_duty = ELECTROMAGNET_PWM_MAX_DUTY - active_duty;
+    ledc_set_duty(ELECTROMAGNET_PWM_MODE, ELECTROMAGNET_PWM_CHANNEL, hardware_duty);
+    ledc_update_duty(ELECTROMAGNET_PWM_MODE, ELECTROMAGNET_PWM_CHANNEL);
+}
+
+static void electromagnet_off(void)
+{
+    electromagnet_apply_duty(0);
+}
+
+static void electromagnet_init(void)
+{
+    const ledc_timer_config_t timer_config = {
+        .speed_mode = ELECTROMAGNET_PWM_MODE,
+        .duty_resolution = ELECTROMAGNET_PWM_RESOLUTION,
+        .timer_num = ELECTROMAGNET_PWM_TIMER,
+        .freq_hz = ELECTROMAGNET_PWM_FREQ_HZ,
+        .clk_cfg = LEDC_AUTO_CLK,
+        .deconfigure = false,
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&timer_config));
+
+    const ledc_channel_config_t channel_config = {
+        .gpio_num = MOSFET_PIN,
+        .speed_mode = ELECTROMAGNET_PWM_MODE,
+        .channel = ELECTROMAGNET_PWM_CHANNEL,
+        .intr_type = LEDC_INTR_DISABLE,
+        .timer_sel = ELECTROMAGNET_PWM_TIMER,
+        .duty = ELECTROMAGNET_PWM_MAX_DUTY,
+        .hpoint = 0,
+        .flags = {
+            .output_invert = 0,
+        },
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&channel_config));
+
+    electromagnet_off();
+}
+
+static void test_session_reset(void)
+{
+    memset(&g_test_session, 0, sizeof(g_test_session));
+}
+
+static void electromagnet_model_sort(void)
+{
+    for (int i = 0; i < g_electromagnet_model.point_count; ++i) {
+        for (int j = i + 1; j < g_electromagnet_model.point_count; ++j) {
+            if (g_electromagnet_model.mass_g[j] < g_electromagnet_model.mass_g[i]) {
+                const float mass_tmp = g_electromagnet_model.mass_g[i];
+                g_electromagnet_model.mass_g[i] = g_electromagnet_model.mass_g[j];
+                g_electromagnet_model.mass_g[j] = mass_tmp;
+
+                const uint16_t duty_tmp = g_electromagnet_model.pwm_duty[i];
+                g_electromagnet_model.pwm_duty[i] = g_electromagnet_model.pwm_duty[j];
+                g_electromagnet_model.pwm_duty[j] = duty_tmp;
+            }
+        }
+    }
+}
+
+static void electromagnet_model_reset_defaults(void)
+{
+    memset(&g_electromagnet_model, 0, sizeof(g_electromagnet_model));
+}
+
+static esp_err_t save_electromagnet_model_to_nvs(void)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open("piezo", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_set_blob(handle, "mag_model", &g_electromagnet_model, sizeof(g_electromagnet_model));
+    if (err == ESP_OK) {
+        err = nvs_set_u8(handle, "mag_model_ver", ELECTROMAGNET_MODEL_VERSION);
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+
+    nvs_close(handle);
+    return err;
+}
+
+static esp_err_t load_electromagnet_model_from_nvs(void)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open("piezo", NVS_READONLY, &handle);
+    if (err != ESP_OK) {
+        electromagnet_model_reset_defaults();
+        return err;
+    }
+
+    uint8_t version = 0;
+    err = nvs_get_u8(handle, "mag_model_ver", &version);
+    if (err != ESP_OK || version != ELECTROMAGNET_MODEL_VERSION) {
+        nvs_close(handle);
+        electromagnet_model_reset_defaults();
+        return ESP_ERR_NVS_NOT_FOUND;
+    }
+
+    size_t size = sizeof(g_electromagnet_model);
+    err = nvs_get_blob(handle, "mag_model", &g_electromagnet_model, &size);
+    nvs_close(handle);
+    if (
+        err != ESP_OK ||
+        size != sizeof(g_electromagnet_model) ||
+        g_electromagnet_model.point_count > ELECTROMAGNET_MODEL_MAX_POINTS
+    ) {
+        electromagnet_model_reset_defaults();
+        return (err != ESP_OK) ? err : ESP_FAIL;
+    }
+
+    electromagnet_model_sort();
+    return ESP_OK;
+}
+
+static void electromagnet_model_upsert_point(float mass_g, uint32_t pwm_duty)
+{
+    if (
+        !(mass_g >= ELECTROMAGNET_MIN_LEARNED_MASS_G) ||
+        !isfinite(mass_g) ||
+        pwm_duty == 0 ||
+        pwm_duty > ELECTROMAGNET_PWM_MAX_DUTY
+    ) {
+        return;
+    }
+
+    for (int i = 0; i < g_electromagnet_model.point_count; ++i) {
+        if (fabsf(g_electromagnet_model.mass_g[i] - mass_g) <= ELECTROMAGNET_POINT_TOLERANCE_G) {
+            g_electromagnet_model.mass_g[i] = (g_electromagnet_model.mass_g[i] + mass_g) * 0.5f;
+            g_electromagnet_model.pwm_duty[i] = (uint16_t)((g_electromagnet_model.pwm_duty[i] + pwm_duty) / 2U);
+            electromagnet_model_sort();
+            save_electromagnet_model_to_nvs();
+            return;
+        }
+    }
+
+    if (g_electromagnet_model.point_count < ELECTROMAGNET_MODEL_MAX_POINTS) {
+        const int idx = g_electromagnet_model.point_count++;
+        g_electromagnet_model.mass_g[idx] = mass_g;
+        g_electromagnet_model.pwm_duty[idx] = (uint16_t)pwm_duty;
+    } else {
+        int replace_idx = 0;
+        float max_distance = -1.0f;
+        for (int i = 0; i < g_electromagnet_model.point_count; ++i) {
+            const float distance = fabsf(g_electromagnet_model.mass_g[i] - mass_g);
+            if (distance > max_distance) {
+                max_distance = distance;
+                replace_idx = i;
+            }
+        }
+        g_electromagnet_model.mass_g[replace_idx] = mass_g;
+        g_electromagnet_model.pwm_duty[replace_idx] = (uint16_t)pwm_duty;
+    }
+
+    electromagnet_model_sort();
+    save_electromagnet_model_to_nvs();
+}
+
+static float electromagnet_default_mass_per_duty(void)
+{
+    const float full_scale_mass_g = LOAD_CELL_CAPACITY_KG * 1000.0f;
+    return full_scale_mass_g / (float)ELECTROMAGNET_PWM_MAX_DUTY;
+}
+
+static uint32_t electromagnet_estimate_pwm_for_mass(float target_mass_g)
+{
+    if (!(target_mass_g > 0.0f) || !isfinite(target_mass_g)) {
+        return 0;
+    }
+
+    if (g_electromagnet_model.point_count == 0) {
+        const float estimated = target_mass_g / electromagnet_default_mass_per_duty();
+        if (estimated <= 0.0f) {
+            return 0;
+        }
+        if (estimated >= (float)ELECTROMAGNET_PWM_MAX_DUTY) {
+            return ELECTROMAGNET_PWM_MAX_DUTY;
+        }
+        return (uint32_t)lrintf(estimated);
+    }
+
+    if (g_electromagnet_model.point_count == 1) {
+        const float ref_mass = g_electromagnet_model.mass_g[0];
+        const float ref_duty = (float)g_electromagnet_model.pwm_duty[0];
+        const float scale = (ref_mass > 0.0f) ? (ref_duty / ref_mass) : (1.0f / electromagnet_default_mass_per_duty());
+        const float estimated = target_mass_g * scale;
+        if (estimated <= 0.0f) {
+            return 0;
+        }
+        if (estimated >= (float)ELECTROMAGNET_PWM_MAX_DUTY) {
+            return ELECTROMAGNET_PWM_MAX_DUTY;
+        }
+        return (uint32_t)lrintf(estimated);
+    }
+
+    const float first_mass = g_electromagnet_model.mass_g[0];
+    const float last_mass = g_electromagnet_model.mass_g[g_electromagnet_model.point_count - 1];
+
+    for (int i = 0; i < g_electromagnet_model.point_count - 1; ++i) {
+        const float mass_a = g_electromagnet_model.mass_g[i];
+        const float mass_b = g_electromagnet_model.mass_g[i + 1];
+        const float duty_a = (float)g_electromagnet_model.pwm_duty[i];
+        const float duty_b = (float)g_electromagnet_model.pwm_duty[i + 1];
+
+        if (target_mass_g >= mass_a && target_mass_g <= mass_b && mass_b > mass_a) {
+            const float ratio = (target_mass_g - mass_a) / (mass_b - mass_a);
+            return (uint32_t)lrintf(duty_a + (duty_b - duty_a) * ratio);
+        }
+    }
+
+    float mass_a = 0.0f;
+    float mass_b = first_mass;
+    float duty_a = 0.0f;
+    float duty_b = (float)g_electromagnet_model.pwm_duty[0];
+
+    if (target_mass_g > last_mass) {
+        mass_a = g_electromagnet_model.mass_g[g_electromagnet_model.point_count - 2];
+        mass_b = g_electromagnet_model.mass_g[g_electromagnet_model.point_count - 1];
+        duty_a = (float)g_electromagnet_model.pwm_duty[g_electromagnet_model.point_count - 2];
+        duty_b = (float)g_electromagnet_model.pwm_duty[g_electromagnet_model.point_count - 1];
+    }
+
+    float estimated = 0.0f;
+    if (mass_b > mass_a) {
+        estimated = duty_a + (target_mass_g - mass_a) * (duty_b - duty_a) / (mass_b - mass_a);
+    } else {
+        estimated = target_mass_g / electromagnet_default_mass_per_duty();
+    }
+
+    if (estimated <= 0.0f) {
+        return 0;
+    }
+    if (estimated >= (float)ELECTROMAGNET_PWM_MAX_DUTY) {
+        return ELECTROMAGNET_PWM_MAX_DUTY;
+    }
+    return (uint32_t)lrintf(estimated);
+}
+
+static float electromagnet_estimate_mass_per_duty(float target_mass_g, uint32_t pwm_duty, float measured_mass_g)
+{
+    if (pwm_duty == 0) {
+        return electromagnet_default_mass_per_duty();
+    }
+
+    if (measured_mass_g > 0.0f && isfinite(measured_mass_g)) {
+        return measured_mass_g / (float)pwm_duty;
+    }
+
+    const uint32_t estimated_pwm = electromagnet_estimate_pwm_for_mass(target_mass_g);
+    if (estimated_pwm > 0 && target_mass_g > 0.0f) {
+        return target_mass_g / (float)estimated_pwm;
+    }
+
+    return electromagnet_default_mass_per_duty();
 }
 
 static void write_line(const char *text)
@@ -602,15 +926,21 @@ static esp_err_t sensor_calibration_run(float reference_resistance)
     return save_sensor_calibration_to_nvs();
 }
 
-static test_result_t run_test_once(void)
+static test_result_t measure_test_sample(uint32_t pwm_duty, float target_mass_g, test_mode_t mode, uint32_t session_index)
 {
     test_result_t result = {0};
+
+    result.mode = (uint8_t)mode;
+    result.target_mass_g = target_mass_g;
+    result.pwm_duty = pwm_duty;
+    result.pwm_percent = ((float)pwm_duty * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY;
+    result.session_index = session_index;
 
     result.load_zero = set_zero(ADS1219_MEAS_SINGLE_2, ADS1219_GAIN_4, VREF_EXT);
     vTaskDelay(pdMS_TO_TICKS(20));
 
-    gpio_set_level(MOSFET_PIN, MOSFET_ON_LEVEL);
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    electromagnet_apply_duty(pwm_duty);
+    vTaskDelay(pdMS_TO_TICKS(ELECTROMAGNET_SETTLE_MS));
 
     result.load_relative = ads1219_measure(
         ADS1219_MEAS_SINGLE_2,
@@ -632,10 +962,174 @@ static test_result_t run_test_once(void)
     vTaskDelay(pdMS_TO_TICKS(10));
     result.sensor_resistance = calculate_resistance(result.sensor_voltage);
 
-    gpio_set_level(MOSFET_PIN, MOSFET_OFF_LEVEL);
-    vTaskDelay(pdMS_TO_TICKS(500));
+    electromagnet_off();
+    vTaskDelay(pdMS_TO_TICKS(ELECTROMAGNET_COOLDOWN_MS));
 
     return result;
+}
+
+static float test_session_target_mass_g(uint16_t index)
+{
+    if (!g_test_session.active || g_test_session.mode != TEST_MODE_RAMP) {
+        return 0.0f;
+    }
+
+    if (g_test_session.sample_count <= 1) {
+        return g_test_session.end_mass_g;
+    }
+
+    const float progress = (float)index / (float)(g_test_session.sample_count - 1U);
+    return g_test_session.start_mass_g + (g_test_session.end_mass_g - g_test_session.start_mass_g) * progress;
+}
+
+static test_result_t run_targeted_ramp_sample(float target_mass_g, uint32_t initial_pwm_duty, uint32_t session_index)
+{
+    uint32_t pwm_duty = initial_pwm_duty;
+    test_result_t best_result = {0};
+    bool best_result_valid = false;
+    float best_error = INFINITY;
+
+    for (int attempt = 0; attempt < ELECTROMAGNET_TARGET_ATTEMPTS; ++attempt) {
+        const test_result_t result = measure_test_sample(pwm_duty, target_mass_g, TEST_MODE_RAMP, session_index);
+        electromagnet_model_upsert_point(result.mass_g, pwm_duty);
+
+        const float error = fabsf(result.mass_g - target_mass_g);
+        if (!best_result_valid || error < best_error) {
+            best_result = result;
+            best_error = error;
+            best_result_valid = true;
+        }
+
+        const float tolerance = fmaxf(20.0f, target_mass_g * 0.03f);
+        if (error <= tolerance) {
+            break;
+        }
+
+        if (attempt >= ELECTROMAGNET_TARGET_ATTEMPTS - 1) {
+            break;
+        }
+
+        float mass_per_duty = electromagnet_estimate_mass_per_duty(target_mass_g, pwm_duty, result.mass_g);
+        if (!(mass_per_duty > 0.0001f) || !isfinite(mass_per_duty)) {
+            mass_per_duty = electromagnet_default_mass_per_duty();
+        }
+
+        int32_t delta_duty = (int32_t)lrintf((target_mass_g - result.mass_g) / mass_per_duty);
+        const int32_t max_step = (int32_t)(ELECTROMAGNET_PWM_MAX_DUTY / 4U);
+        if (delta_duty > max_step) {
+            delta_duty = max_step;
+        }
+        if (delta_duty < -max_step) {
+            delta_duty = -max_step;
+        }
+        if (delta_duty == 0) {
+            delta_duty = (target_mass_g > result.mass_g) ? 1 : -1;
+        }
+
+        int32_t next_pwm = (int32_t)pwm_duty + delta_duty;
+        if (next_pwm < 0) {
+            next_pwm = 0;
+        }
+        if (next_pwm > (int32_t)ELECTROMAGNET_PWM_MAX_DUTY) {
+            next_pwm = (int32_t)ELECTROMAGNET_PWM_MAX_DUTY;
+        }
+
+        if ((uint32_t)next_pwm == pwm_duty) {
+            break;
+        }
+
+        pwm_duty = (uint32_t)next_pwm;
+    }
+
+    return best_result;
+}
+
+static esp_err_t test_session_setup(test_mode_t mode, float start_mass_g, float end_mass_g, uint16_t sample_count)
+{
+    if (sample_count == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (mode == TEST_MODE_RAMP) {
+        if (
+            start_mass_g < 0.0f ||
+            end_mass_g < 0.0f ||
+            !isfinite(start_mass_g) ||
+            !isfinite(end_mass_g) ||
+            end_mass_g < start_mass_g
+        ) {
+            return ESP_ERR_INVALID_ARG;
+        }
+    } else {
+        start_mass_g = 0.0f;
+        end_mass_g = 0.0f;
+    }
+
+    test_session_reset();
+    g_test_session.active = true;
+    g_test_session.mode = mode;
+    g_test_session.sample_count = sample_count;
+    g_test_session.start_mass_g = start_mass_g;
+    g_test_session.end_mass_g = end_mass_g;
+    g_test_session.start_pwm_duty = electromagnet_estimate_pwm_for_mass(start_mass_g);
+    g_test_session.end_pwm_duty = electromagnet_estimate_pwm_for_mass(end_mass_g);
+    return ESP_OK;
+}
+
+static void test_session_abort(void)
+{
+    electromagnet_off();
+    test_session_reset();
+}
+
+static esp_err_t test_session_next(test_result_t *result_out)
+{
+    if (result_out == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!g_test_session.active || g_test_session.sample_count == 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (g_test_session.current_index >= g_test_session.sample_count) {
+        return ESP_ERR_NOT_FINISHED;
+    }
+
+    const uint32_t session_index = (uint32_t)g_test_session.current_index;
+    test_result_t result = {0};
+
+    if (g_test_session.mode == TEST_MODE_RAMP) {
+        const float target_mass_g = test_session_target_mass_g(g_test_session.current_index);
+        uint32_t estimated_pwm = electromagnet_estimate_pwm_for_mass(target_mass_g);
+
+        if (g_test_session.sample_count > 1) {
+            const float progress = (float)g_test_session.current_index / (float)(g_test_session.sample_count - 1U);
+            const float endpoint_estimate =
+                (float)g_test_session.start_pwm_duty +
+                ((float)g_test_session.end_pwm_duty - (float)g_test_session.start_pwm_duty) * progress;
+            const uint32_t blended_pwm = (uint32_t)lrintf((endpoint_estimate + (float)estimated_pwm) * 0.5f);
+            estimated_pwm = blended_pwm;
+        }
+
+        result = run_targeted_ramp_sample(target_mass_g, estimated_pwm, session_index);
+    } else {
+        result = measure_test_sample(ELECTROMAGNET_PWM_MAX_DUTY, 0.0f, TEST_MODE_STANDARD, session_index);
+        electromagnet_model_upsert_point(result.mass_g, result.pwm_duty);
+    }
+
+    g_test_session.current_index++;
+    if (g_test_session.current_index >= g_test_session.sample_count) {
+        g_test_session.active = false;
+    }
+
+    *result_out = result;
+    return ESP_OK;
+}
+
+static test_result_t run_test_once(void)
+{
+    return measure_test_sample(ELECTROMAGNET_PWM_MAX_DUTY, 0.0f, TEST_MODE_STANDARD, g_test_counter);
 }
 
 static void send_status(void)
@@ -644,7 +1138,8 @@ static void send_status(void)
     writef(
         "STATUS calibrated=%d nominal_kg_per_v=%.9f kg_per_v=%.9f correction=%.9f "
         "cal_mass=%.6f nominal_mass=%.6f cal_signal=%.9f cal_zero=%.9f "
-        "sensor_calibrated=%d sensor_factor=%.9f sensor_ref=%.6f sensor_raw=%.6f sensor_voltage=%.9f",
+        "sensor_calibrated=%d sensor_factor=%.9f sensor_ref=%.6f sensor_raw=%.6f sensor_voltage=%.9f "
+        "mag_points=%u test_active=%d test_mode=%u test_samples=%u test_index=%u",
         g_calibration.valid ? 1 : 0,
         nominal_kg_per_v,
         g_calibration.a,
@@ -657,7 +1152,12 @@ static void send_status(void)
         g_sensor_calibration.factor,
         g_sensor_calibration.reference_resistance,
         g_sensor_calibration.raw_resistance,
-        g_sensor_calibration.measured_voltage
+        g_sensor_calibration.measured_voltage,
+        (unsigned)g_electromagnet_model.point_count,
+        g_test_session.active ? 1 : 0,
+        (unsigned)g_test_session.mode,
+        (unsigned)g_test_session.sample_count,
+        (unsigned)g_test_session.current_index
     );
 }
 
@@ -779,11 +1279,85 @@ static void handle_command(const char *line)
         return;
     }
 
+    if (strncmp(line, "TEST_SETUP ", 11) == 0) {
+        char mode_text[16] = {0};
+        float start_g = 0.0f;
+        float end_g = 0.0f;
+        unsigned sample_count = 0;
+
+        if (sscanf(line, "TEST_SETUP mode=%15s start_g=%f end_g=%f samples=%u", mode_text, &start_g, &end_g, &sample_count) != 4) {
+            write_line("ERR test_setup_invalid_args");
+            return;
+        }
+
+        test_mode_t mode = TEST_MODE_STANDARD;
+        if (strcmp(mode_text, "ramp") == 0) {
+            mode = TEST_MODE_RAMP;
+        } else if (strcmp(mode_text, "standard") != 0) {
+            write_line("ERR test_setup_invalid_mode");
+            return;
+        }
+
+        const esp_err_t err = test_session_setup(mode, start_g, end_g, (uint16_t)sample_count);
+        if (err != ESP_OK) {
+            writef("ERR test_setup_failed code=%d", (int)err);
+            return;
+        }
+
+        writef(
+            "TEST_SETUP_OK mode=%s samples=%u start_g=%.3f end_g=%.3f start_pwm=%u end_pwm=%u",
+            (mode == TEST_MODE_RAMP) ? "ramp" : "standard",
+            sample_count,
+            g_test_session.start_mass_g,
+            g_test_session.end_mass_g,
+            (unsigned)g_test_session.start_pwm_duty,
+            (unsigned)g_test_session.end_pwm_duty
+        );
+        return;
+    }
+
+    if (strcmp(line, "TEST_NEXT") == 0) {
+        test_result_t result = {0};
+        const esp_err_t err = test_session_next(&result);
+        if (err == ESP_ERR_NOT_FINISHED) {
+            write_line("TEST_DONE");
+            return;
+        }
+        if (err != ESP_OK) {
+            writef("ERR test_next_failed code=%d", (int)err);
+            return;
+        }
+
+        writef(
+            "TEST_RESULT idx=%lu mode=%s target_g=%.3f pwm=%u pwm_pct=%.3f load_v=%.9f zero_v=%.9f relative_v=%.9f mass_g=%.3f resistance=%.3f sensor_v=%.9f",
+            (unsigned long)g_test_counter++,
+            (result.mode == TEST_MODE_RAMP) ? "ramp" : "standard",
+            result.target_mass_g,
+            (unsigned)result.pwm_duty,
+            result.pwm_percent,
+            result.load_voltage,
+            result.load_zero,
+            result.load_relative,
+            result.mass_g,
+            result.sensor_resistance,
+            result.sensor_voltage
+        );
+        return;
+    }
+
+    if (strcmp(line, "TEST_ABORT") == 0) {
+        test_session_abort();
+        write_line("TEST_ABORT_OK");
+        return;
+    }
+
     if (strcmp(line, "TEST") == 0) {
         const test_result_t result = run_test_once();
         writef(
-            "TEST_RESULT idx=%lu load_v=%.9f zero_v=%.9f relative_v=%.9f mass_g=%.3f resistance=%.3f sensor_v=%.9f",
+            "TEST_RESULT idx=%lu mode=standard target_g=0.000 pwm=%u pwm_pct=%.3f load_v=%.9f zero_v=%.9f relative_v=%.9f mass_g=%.3f resistance=%.3f sensor_v=%.9f",
             (unsigned long)g_test_counter++,
+            (unsigned)result.pwm_duty,
+            result.pwm_percent,
             result.load_voltage,
             result.load_zero,
             result.load_relative,
@@ -795,7 +1369,7 @@ static void handle_command(const char *line)
     }
 
     if (strcmp(line, "HELP") == 0) {
-        write_line("OK commands=PING,STATUS,CAL_START,CAL_ZERO,CAL_POINT <kg>,CAL_SAVE,LOAD_TARE,LOAD_PREVIEW,SENSOR_CAL <ohm>,TEST,HELP");
+        write_line("OK commands=PING,STATUS,CAL_START,CAL_ZERO,CAL_POINT <kg>,CAL_SAVE,LOAD_TARE,LOAD_PREVIEW,SENSOR_CAL <ohm>,TEST_SETUP mode=<standard|ramp> start_g=<g> end_g=<g> samples=<n>,TEST_NEXT,TEST_ABORT,TEST,HELP");
         return;
     }
 
@@ -804,20 +1378,11 @@ static void handle_command(const char *line)
 
 void app_main(void)
 {
-    gpio_config_t io_conf = {
-        .pin_bit_mask = 1ULL << MOSFET_PIN,
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
-    gpio_config(&io_conf);
-    gpio_set_level(MOSFET_PIN, MOSFET_OFF_LEVEL);
-
     initUART();
     initI2C();
     ADS1219_init(ADS1219_RST_PIN, ADS1219_DRDY_PIN);
     gpio_set_level(ADS1219_RST_PIN, 1);
+    electromagnet_init();
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -833,6 +1398,9 @@ void app_main(void)
 
     sensor_calibration_reset_defaults();
     load_sensor_calibration_from_nvs();
+    electromagnet_model_reset_defaults();
+    load_electromagnet_model_from_nvs();
+    test_session_reset();
     write_line(load_calibration_ok ? "READY calibrated=1" : "READY calibrated=0");
 
     char line[128];

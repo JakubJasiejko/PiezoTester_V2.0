@@ -16,12 +16,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
 #include "i2c.h"
 #include "uart.h"
 #include <stdio.h>
 #include <string.h>
 
-bool drdy_flag = false;
+volatile bool drdy_flag = false;
 
 static void IRAM_ATTR drdy_isr_handler(void* arg) {
     drdy_flag = true;
@@ -82,9 +83,12 @@ uint8_t ads1219_configureMeasurement(uint8_t address, uint8_t input, uint8_t gai
 }
 
 int32_t ads1219_read(uint8_t address) {
-    //isr
+    const int64_t deadline_us = esp_timer_get_time() + 100000;
     while (!ads1219_data_ready()) {
-        ;
+        if (esp_timer_get_time() > deadline_us) {
+            return 0x7FFFFFFF;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 
     if (ads1219_readDataTrigger(address) == 0xFF) {
@@ -94,8 +98,6 @@ int32_t ads1219_read(uint8_t address) {
     int32_t result = i2c_read24(address);
     return (result == 0x7FFFFFFF) ? 0x7FFFFFFF : result;
 }
-
-
 
 
 
