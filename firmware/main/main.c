@@ -92,6 +92,8 @@ typedef struct {
     uint32_t session_index;
     uint8_t mode;
     uint8_t phase;
+    uint16_t cycle_index;
+    uint16_t phase_point;
 } test_result_t;
 
 typedef enum {
@@ -137,6 +139,7 @@ typedef struct {
     bool active;
     test_mode_t mode;
     uint16_t sample_count;
+    uint16_t hysteresis_points;
     uint16_t current_index;
     float start_mass_g;
     float end_mass_g;
@@ -1588,13 +1591,17 @@ static test_result_t measure_test_sample_burst(
     float target_mass_g,
     test_mode_t mode,
     test_phase_t phase,
-    uint32_t session_index
+    uint32_t session_index,
+    uint16_t cycle_index,
+    uint16_t phase_point
 )
 {
     test_result_t result = {0};
 
     result.mode = (uint8_t)mode;
     result.phase = (uint8_t)phase;
+    result.cycle_index = cycle_index;
+    result.phase_point = phase_point;
     result.target_mass_g = target_mass_g;
     result.pwm_duty = pwm_duty;
     result.pwm_percent = ((float)pwm_duty * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY;
@@ -1664,42 +1671,64 @@ static uint16_t test_session_total_steps(void)
     }
 
     if (g_test_session.mode == TEST_MODE_HYSTERESIS) {
-        return (uint16_t)(g_test_session.sample_count * 2U);
+        return (uint16_t)(g_test_session.sample_count * g_test_session.hysteresis_points * 2U);
     }
 
     return g_test_session.sample_count;
 }
 
-static float test_session_hysteresis_target_mass_g(uint16_t index, test_phase_t *phase_out)
+static float test_session_hysteresis_target_mass_g(
+    uint16_t index,
+    test_phase_t *phase_out,
+    uint16_t *cycle_index_out,
+    uint16_t *phase_point_out
+)
 {
     if (phase_out != NULL) {
         *phase_out = TEST_PHASE_NONE;
     }
+    if (cycle_index_out != NULL) {
+        *cycle_index_out = 0U;
+    }
+    if (phase_point_out != NULL) {
+        *phase_point_out = 0U;
+    }
 
-    if (!g_test_session.active || g_test_session.mode != TEST_MODE_HYSTERESIS || g_test_session.sample_count == 0U) {
+    if (
+        !g_test_session.active ||
+        g_test_session.mode != TEST_MODE_HYSTERESIS ||
+        g_test_session.sample_count == 0U ||
+        g_test_session.hysteresis_points == 0U
+    ) {
         return 0.0f;
     }
 
-    if (index < g_test_session.sample_count) {
-        if (phase_out != NULL) {
-            *phase_out = TEST_PHASE_LOADING;
-        }
-        if (g_test_session.sample_count <= 1U) {
-            return g_test_session.end_mass_g;
-        }
-        const float progress = (float)index / (float)(g_test_session.sample_count - 1U);
-        return g_test_session.start_mass_g + (g_test_session.end_mass_g - g_test_session.start_mass_g) * progress;
+    const uint16_t branch_points = g_test_session.hysteresis_points;
+    const uint16_t cycle_span = (uint16_t)(branch_points * 2U);
+    const uint16_t cycle_index = (uint16_t)(index / cycle_span);
+    const uint16_t cycle_offset = (uint16_t)(index % cycle_span);
+    const bool unloading = cycle_offset >= branch_points;
+    const uint16_t phase_point = unloading ? (uint16_t)(cycle_offset - branch_points) : cycle_offset;
+
+    if (cycle_index_out != NULL) {
+        *cycle_index_out = cycle_index;
+    }
+    if (phase_point_out != NULL) {
+        *phase_point_out = phase_point;
+    }
+    if (phase_out != NULL) {
+        *phase_out = unloading ? TEST_PHASE_UNLOADING : TEST_PHASE_LOADING;
     }
 
-    if (phase_out != NULL) {
-        *phase_out = TEST_PHASE_UNLOADING;
+    if (branch_points <= 1U) {
+        return unloading ? g_test_session.start_mass_g : g_test_session.end_mass_g;
     }
-    if (g_test_session.sample_count <= 1U) {
-        return g_test_session.start_mass_g;
+
+    const float progress = (float)phase_point / (float)(branch_points - 1U);
+    if (unloading) {
+        return g_test_session.end_mass_g - (g_test_session.end_mass_g - g_test_session.start_mass_g) * progress;
     }
-    const uint16_t down_index = (uint16_t)(index - g_test_session.sample_count);
-    const float progress = (float)down_index / (float)(g_test_session.sample_count - 1U);
-    return g_test_session.end_mass_g - (g_test_session.end_mass_g - g_test_session.start_mass_g) * progress;
+    return g_test_session.start_mass_g + (g_test_session.end_mass_g - g_test_session.start_mass_g) * progress;
 }
 
 static test_result_t run_targeted_ramp_sample(float target_mass_g, uint32_t initial_pwm_duty, uint32_t session_index)
@@ -1764,9 +1793,19 @@ static test_result_t run_targeted_ramp_sample(float target_mass_g, uint32_t init
     return best_result;
 }
 
-static esp_err_t test_session_setup(test_mode_t mode, float start_mass_g, float end_mass_g, uint16_t sample_count)
+static esp_err_t test_session_setup(
+    test_mode_t mode,
+    float start_mass_g,
+    float end_mass_g,
+    uint16_t sample_count,
+    uint16_t hysteresis_points
+)
 {
     if (sample_count == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (mode == TEST_MODE_HYSTERESIS && hysteresis_points < 2U) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -1789,6 +1828,7 @@ static esp_err_t test_session_setup(test_mode_t mode, float start_mass_g, float 
     g_test_session.active = true;
     g_test_session.mode = mode;
     g_test_session.sample_count = sample_count;
+    g_test_session.hysteresis_points = (mode == TEST_MODE_HYSTERESIS) ? hysteresis_points : 0U;
     g_test_session.start_mass_g = start_mass_g;
     g_test_session.end_mass_g = end_mass_g;
     g_test_session.start_pwm_duty = electromagnet_estimate_pwm_for_mass(start_mass_g);
@@ -1835,14 +1875,23 @@ static esp_err_t test_session_next(test_result_t *result_out)
         result = run_targeted_ramp_sample(target_mass_g, estimated_pwm, session_index);
     } else if (g_test_session.mode == TEST_MODE_HYSTERESIS) {
         test_phase_t phase = TEST_PHASE_NONE;
-        const float target_mass_g = test_session_hysteresis_target_mass_g(g_test_session.current_index, &phase);
+        uint16_t cycle_index = 0U;
+        uint16_t phase_point = 0U;
+        const float target_mass_g = test_session_hysteresis_target_mass_g(
+            g_test_session.current_index,
+            &phase,
+            &cycle_index,
+            &phase_point
+        );
         const uint32_t estimated_pwm = electromagnet_estimate_pwm_for_mass(target_mass_g);
         result = measure_test_sample_burst(
             estimated_pwm,
             target_mass_g,
             TEST_MODE_HYSTERESIS,
             phase,
-            session_index
+            session_index,
+            cycle_index,
+            phase_point
         );
         electromagnet_model_upsert_point(result.mass_g, result.pwm_duty);
     } else {
@@ -2363,9 +2412,15 @@ static void handle_command(const char *line)
         char mode_text[16] = {0};
         float start_g = 0.0f;
         float end_g = 0.0f;
-        unsigned sample_count = 0;
+        uint32_t sample_count = 0;
+        uint32_t hysteresis_points = 0;
 
-        if (sscanf(line, "TEST_SETUP mode=%15s start_g=%f end_g=%f samples=%u", mode_text, &start_g, &end_g, &sample_count) != 4) {
+        if (
+            !parse_string_argument(line, "mode", mode_text, sizeof(mode_text)) ||
+            !parse_float_argument(line, "start_g", &start_g) ||
+            !parse_float_argument(line, "end_g", &end_g) ||
+            !parse_u32_argument(line, "samples", &sample_count)
+        ) {
             write_line("ERR test_setup_invalid_args");
             return;
         }
@@ -2380,16 +2435,28 @@ static void handle_command(const char *line)
             return;
         }
 
-        const esp_err_t err = test_session_setup(mode, start_g, end_g, (uint16_t)sample_count);
+        if (mode == TEST_MODE_HYSTERESIS && !parse_u32_argument(line, "points", &hysteresis_points)) {
+            write_line("ERR test_setup_invalid_points");
+            return;
+        }
+
+        const esp_err_t err = test_session_setup(
+            mode,
+            start_g,
+            end_g,
+            (uint16_t)sample_count,
+            (uint16_t)hysteresis_points
+        );
         if (err != ESP_OK) {
             writef("ERR test_setup_failed code=%d", (int)err);
             return;
         }
 
         writef(
-            "TEST_SETUP_OK mode=%s samples=%u start_g=%.3f end_g=%.3f start_pwm=%u end_pwm=%u",
+            "TEST_SETUP_OK mode=%s samples=%u points=%u start_g=%.3f end_g=%.3f start_pwm=%u end_pwm=%u",
             test_mode_to_text(mode),
-            sample_count,
+            (unsigned)sample_count,
+            (unsigned)g_test_session.hysteresis_points,
             g_test_session.start_mass_g,
             g_test_session.end_mass_g,
             (unsigned)g_test_session.start_pwm_duty,
@@ -2411,10 +2478,12 @@ static void handle_command(const char *line)
         }
 
         writef(
-            "TEST_RESULT idx=%lu mode=%s phase=%s target_g=%.3f pwm=%u pwm_pct=%.3f load_v=%.9f zero_v=%.9f relative_v=%.9f mass_g=%.3f resistance=%.3f sensor_v=%.9f",
+            "TEST_RESULT idx=%lu mode=%s phase=%s cycle=%u point=%u target_g=%.3f pwm=%u pwm_pct=%.3f load_v=%.9f zero_v=%.9f relative_v=%.9f mass_g=%.3f resistance=%.3f sensor_v=%.9f",
             (unsigned long)g_test_counter++,
             test_mode_to_text((test_mode_t)result.mode),
             test_phase_to_text(result.phase),
+            (unsigned)result.cycle_index,
+            (unsigned)result.phase_point,
             result.target_mass_g,
             (unsigned)result.pwm_duty,
             result.pwm_percent,
@@ -2452,7 +2521,7 @@ static void handle_command(const char *line)
     }
 
     if (strcmp(line, "HELP") == 0) {
-        write_line("OK commands=PING,STATUS,CAL_START,CAL_ZERO,CAL_POINT <kg>,CAL_SAVE,LOAD_TARE,LOAD_PREVIEW,SENSOR_CAL <ohm>,MAG_PULSE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_MEASURE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_PREMODEL_SET [move=<n>|move_pct=<x>] [contact=<n>|contact_pct=<x>] [threshold=<n>|threshold_pct=<x>] [full_scale_g=<g>],MAG_PREMODEL_CLEAR,MAG_PREMODEL_STATUS,MAG_CONTACT_CONFIG count=<n> start_pct=<x> end_pct=<x>,MAG_CONTACT_POINT_SET slot=<n> state=<unknown|no_contact|moved|contact> [full_scale_g=<g>],MAG_CONTACT_POINTS_CLEAR,MAG_MODEL_CLEAR,TEST_SETUP mode=<standard|ramp> start_g=<g> end_g=<g> samples=<n>,TEST_NEXT,TEST_ABORT,TEST,HELP");
+        write_line("OK commands=PING,STATUS,CAL_START,CAL_ZERO,CAL_POINT <kg>,CAL_SAVE,LOAD_TARE,LOAD_PREVIEW,SENSOR_CAL <ohm>,MAG_PULSE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_MEASURE duty=<n>|pct=<x> [hold_ms=<ms>],MAG_PREMODEL_SET [move=<n>|move_pct=<x>] [contact=<n>|contact_pct=<x>] [threshold=<n>|threshold_pct=<x>] [full_scale_g=<g>],MAG_PREMODEL_CLEAR,MAG_PREMODEL_STATUS,MAG_CONTACT_CONFIG count=<n> start_pct=<x> end_pct=<x>,MAG_CONTACT_POINT_SET slot=<n> state=<unknown|no_contact|moved|contact> [full_scale_g=<g>],MAG_CONTACT_POINTS_CLEAR,MAG_MODEL_CLEAR,TEST_SETUP mode=<standard|ramp|hysteresis> start_g=<g> end_g=<g> samples=<n> [points=<n>],TEST_NEXT,TEST_ABORT,TEST,HELP");
         return;
     }
 

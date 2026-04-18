@@ -106,6 +106,8 @@ class TestResult:
     idx: int
     mode: str
     phase: str
+    cycle: int
+    phase_point: int
     target_g: float
     pwm_duty: int
     pwm_percent: float
@@ -124,6 +126,7 @@ class TestSettings:
     sample_count: int
     start_mass_g: float = 0.0
     end_mass_g: float = 0.0
+    hysteresis_points: int = 0
 
 
 @dataclass
@@ -326,6 +329,11 @@ class TestSetupDialog(QDialog):
         self.end_mass_spin.setValue(1000.0)
         form.addRow("Obciazenie koncowe", self.end_mass_spin)
 
+        self.hysteresis_points_spin = QSpinBox()
+        self.hysteresis_points_spin.setRange(2, 500)
+        self.hysteresis_points_spin.setValue(10)
+        form.addRow("Punkty na galaz", self.hysteresis_points_spin)
+
         layout.addLayout(form)
 
         self.mode_status_label = QLabel()
@@ -349,6 +357,7 @@ class TestSetupDialog(QDialog):
         has_load_range = mode in {"ramp", "hysteresis"}
         self.start_mass_spin.setEnabled(has_load_range)
         self.end_mass_spin.setEnabled(has_load_range)
+        self.hysteresis_points_spin.setEnabled(mode == "hysteresis")
 
         if mode == "ramp":
             self.mode_status_label.setText(
@@ -374,6 +383,7 @@ class TestSetupDialog(QDialog):
             sample_count=self.sample_count_spin.value(),
             start_mass_g=start_mass_g,
             end_mass_g=end_mass_g,
+            hysteresis_points=self.hysteresis_points_spin.value() if mode == "hysteresis" else 0,
         )
 
     def accept(self) -> None:
@@ -383,6 +393,9 @@ class TestSetupDialog(QDialog):
             return
         if settings.mode in {"ramp", "hysteresis"} and settings.end_mass_g < settings.start_mass_g:
             QMessageBox.critical(self, "Test", "Obciazenie koncowe nie moze byc mniejsze od wstepnego.")
+            return
+        if settings.mode == "hysteresis" and settings.hysteresis_points < 2:
+            QMessageBox.critical(self, "Test", "Dla histerezy podaj co najmniej 2 punkty na galaz.")
             return
         super().accept()
 
@@ -1408,7 +1421,8 @@ class TrialSummaryDialog(QDialog):
                 info_form.addRow("Obciazenie wstepne", QLabel(f"{settings.start_mass_g:.1f} g"))
                 info_form.addRow("Obciazenie koncowe", QLabel(f"{settings.end_mass_g:.1f} g"))
                 if settings.mode == "hysteresis":
-                    info_form.addRow("Punkty na galaz", QLabel(str(settings.sample_count)))
+                    info_form.addRow("Liczba cykli", QLabel(str(settings.sample_count)))
+                    info_form.addRow("Punkty na galaz", QLabel(str(settings.hysteresis_points)))
 
         session_csv_label = QLabel(str(self.summary.csv_log_path))
         session_csv_label.setWordWrap(True)
@@ -1469,6 +1483,32 @@ class TrialSummaryDialog(QDialog):
             chart_view.setStyleSheet("background: white; border: 1px solid #d1d5db; border-radius: 8px;")
             self.chart_views.append(chart_view)
             content_layout.addWidget(chart_view)
+
+        if self.summary.test_settings is not None and self.summary.test_settings.mode == "hysteresis":
+            for cycle in self.app.hysteresis_cycle_numbers():
+                cycle_title_label = QLabel(f"Histereza - cykl {cycle + 1}")
+                cycle_title_label.setStyleSheet("font-size: 14px; font-weight: 600; color: #111827;")
+                content_layout.addWidget(cycle_title_label)
+
+                cycle_view = QChartView(self.app.build_hysteresis_cycle_chart(cycle))
+                cycle_view.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                cycle_view.setMinimumHeight(360)
+                cycle_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                cycle_view.setStyleSheet("background: white; border: 1px solid #d1d5db; border-radius: 8px;")
+                self.chart_views.append(cycle_view)
+                content_layout.addWidget(cycle_view)
+
+            avg_title_label = QLabel("Histereza - wykres usredniony")
+            avg_title_label.setStyleSheet("font-size: 14px; font-weight: 600; color: #111827;")
+            content_layout.addWidget(avg_title_label)
+
+            avg_view = QChartView(self.app.build_hysteresis_average_chart())
+            avg_view.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            avg_view.setMinimumHeight(360)
+            avg_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            avg_view.setStyleSheet("background: white; border: 1px solid #d1d5db; border-radius: 8px;")
+            self.chart_views.append(avg_view)
+            content_layout.addWidget(avg_view)
 
         content_layout.addStretch(1)
 
@@ -1770,7 +1810,8 @@ class TrialSummaryDialog(QDialog):
                     info_items.append(("Obciazenie start", f"{settings.start_mass_g:.1f} g"))
                     info_items.append(("Obciazenie koniec", f"{settings.end_mass_g:.1f} g"))
                 if settings.mode == "hysteresis":
-                    info_items.append(("Punkty na galaz", str(settings.sample_count)))
+                    info_items.append(("Liczba cykli", str(settings.sample_count)))
+                    info_items.append(("Punkty na galaz", str(settings.hysteresis_points)))
 
             info_rows = max(1, (len(info_items) + 1) // 2)
             info_height = 44 + info_rows * 48
@@ -1899,10 +1940,36 @@ class TrialSummaryDialog(QDialog):
 
             y = table_y + row_height * (len(table_rows) + 1) + 28
 
-            chart_pixmaps = [
-                (title, self.app.render_chart_pixmap(mode, QSize(1400, 820)))
-                for mode, title in self.CHART_ITEMS
-            ]
+            if self.summary.test_settings is not None and self.summary.test_settings.mode == "hysteresis":
+                chart_pixmaps = [
+                    ("Rezystancja / Nr probki", self.app.render_chart_pixmap(0, QSize(1400, 820))),
+                    ("Obciazenie / Nr probki", self.app.render_chart_pixmap(1, QSize(1400, 820))),
+                    ("Histereza - wykres zbiorczy", self.app.render_chart_pixmap(2, QSize(1400, 820))),
+                ]
+                for cycle in self.app.hysteresis_cycle_numbers():
+                    chart_pixmaps.append(
+                        (
+                            f"Histereza - cykl {cycle + 1}",
+                            self.app.render_chart_object_pixmap(
+                                self.app.build_hysteresis_cycle_chart(cycle),
+                                QSize(1400, 820),
+                            ),
+                        )
+                    )
+                chart_pixmaps.append(
+                    (
+                        "Histereza - wykres usredniony",
+                        self.app.render_chart_object_pixmap(
+                            self.app.build_hysteresis_average_chart(),
+                            QSize(1400, 820),
+                        ),
+                    )
+                )
+            else:
+                chart_pixmaps = [
+                    (title, self.app.render_chart_pixmap(mode, QSize(1400, 820)))
+                    for mode, title in self.CHART_ITEMS
+                ]
 
             for chart_title, pixmap in chart_pixmaps:
                 scaled_height = int(content_width * pixmap.height() / pixmap.width())
@@ -2318,7 +2385,8 @@ class PiezoTesterWindow(QMainWindow):
                 f"TEST_SETUP mode={settings.mode} "
                 f"start_g={settings.start_mass_g:.3f} "
                 f"end_g={settings.end_mass_g:.3f} "
-                f"samples={settings.sample_count}"
+                f"samples={settings.sample_count} "
+                f"points={settings.hysteresis_points}"
             ),
             ("TEST_SETUP_OK",),
             timeout=20.0,
@@ -2355,7 +2423,11 @@ class PiezoTesterWindow(QMainWindow):
                 setup_done = True
                 self.ui_queue.put(("test_log", setup_line))
 
-                expected_steps = settings.sample_count * 2 if settings.mode == "hysteresis" else settings.sample_count
+                expected_steps = (
+                    settings.sample_count * settings.hysteresis_points * 2
+                    if settings.mode == "hysteresis"
+                    else settings.sample_count
+                )
                 for _ in range(expected_steps):
                     if self.stop_measurement_event.is_set():
                         break
@@ -2391,7 +2463,8 @@ class PiezoTesterWindow(QMainWindow):
         elif settings.mode == "hysteresis":
             self.log(
                 f"Uruchomiono test histerezy: start={settings.start_mass_g:.1f} g, "
-                f"koniec={settings.end_mass_g:.1f} g, punkty na galaz={settings.sample_count}."
+                f"koniec={settings.end_mass_g:.1f} g, cykle={settings.sample_count}, "
+                f"punkty na galaz={settings.hysteresis_points}."
             )
         else:
             self.log(f"Uruchomiono test standardowy: probki={settings.sample_count}.")
@@ -2487,6 +2560,152 @@ class PiezoTesterWindow(QMainWindow):
     def resistance_stats_for_phase(self, phase: str) -> MetricStats | None:
         return calculate_stats([result.resistance for result in self.results if result.phase == phase])
 
+    def hysteresis_cycle_numbers(self) -> list[int]:
+        return sorted({result.cycle for result in self.results if result.mode == "hysteresis"})
+
+    def _finalize_xy_chart(
+        self,
+        chart: QChart,
+        series_list: list[QLineSeries],
+        x_values: list[float],
+        y_values: list[float],
+        x_title: str,
+        y_title: str,
+    ) -> QChart:
+        if not x_values or not y_values:
+            chart.setTitle("Brak poprawnych danych do wykresu")
+            return chart
+
+        x_axis = QValueAxis()
+        y_axis = QValueAxis()
+        x_axis.setTitleText(x_title)
+        y_axis.setTitleText(y_title)
+
+        x_min = min(x_values)
+        x_max = max(x_values)
+        y_min = min(y_values)
+        y_max = max(y_values)
+
+        if x_min == x_max:
+            x_min -= 1.0
+            x_max += 1.0
+        if y_min == y_max:
+            y_min -= 1.0
+            y_max += 1.0
+
+        x_margin = (x_max - x_min) * 0.05
+        y_margin = (y_max - y_min) * 0.10
+        x_axis.setRange(x_min - x_margin, x_max + x_margin)
+        y_axis.setRange(y_min - y_margin, y_max + y_margin)
+
+        chart.addAxis(x_axis, Qt.AlignmentFlag.AlignBottom)
+        chart.addAxis(y_axis, Qt.AlignmentFlag.AlignLeft)
+        for series in series_list:
+            chart.addSeries(series)
+            series.attachAxis(x_axis)
+            series.attachAxis(y_axis)
+        return chart
+
+    def build_hysteresis_cycle_chart(self, cycle: int) -> QChart:
+        chart = QChart()
+        chart.legend().setVisible(True)
+        chart.setBackgroundVisible(False)
+        chart.setTitle(f"Petla histerezy - cykl {cycle + 1}")
+
+        cycle_results = sorted(
+            [
+            result for result in self.results
+            if result.mode == "hysteresis" and result.cycle == cycle and not math.isnan(result.mass_g) and not math.isnan(result.resistance)
+            ],
+            key=lambda result: (0 if result.phase == "loading" else 1, result.phase_point, result.idx),
+        )
+        if not cycle_results:
+            chart.setTitle("Brak danych cyklu histerezy")
+            return chart
+
+        loading = QLineSeries()
+        unloading = QLineSeries()
+        loading_pen = QPen(QColor("#c62828"))
+        unloading_pen = QPen(QColor("#1565c0"))
+        loading_pen.setWidth(1)
+        unloading_pen.setWidth(1)
+        loading.setPen(loading_pen)
+        unloading.setPen(unloading_pen)
+        loading.setName("Obciazanie")
+        unloading.setName("Odciazanie")
+
+        x_values: list[float] = []
+        y_values: list[float] = []
+        for result in cycle_results:
+            point = (float(result.mass_g), float(result.resistance))
+            x_values.append(point[0])
+            y_values.append(point[1])
+            if result.phase == "unloading":
+                unloading.append(*point)
+            else:
+                loading.append(*point)
+
+        return self._finalize_xy_chart(
+            chart,
+            [loading, unloading],
+            x_values,
+            y_values,
+            "Obciazenie [g]",
+            "Rezystancja",
+        )
+
+    def build_hysteresis_average_chart(self) -> QChart:
+        chart = QChart()
+        chart.legend().setVisible(True)
+        chart.setBackgroundVisible(False)
+        chart.setTitle("Petla histerezy - wykres usredniony")
+
+        grouped: dict[tuple[str, int], list[tuple[float, float]]] = {}
+        for result in self.results:
+            if result.mode != "hysteresis" or math.isnan(result.mass_g) or math.isnan(result.resistance):
+                continue
+            key = (result.phase, result.phase_point)
+            grouped.setdefault(key, []).append((result.mass_g, result.resistance))
+
+        if not grouped:
+            chart.setTitle("Brak danych do usredniania")
+            return chart
+
+        loading = QLineSeries()
+        unloading = QLineSeries()
+        loading_pen = QPen(QColor("#c62828"))
+        unloading_pen = QPen(QColor("#1565c0"))
+        loading_pen.setWidth(1)
+        unloading_pen.setWidth(1)
+        loading.setPen(loading_pen)
+        unloading.setPen(unloading_pen)
+        loading.setName("Obciazanie srednie")
+        unloading.setName("Odciazanie srednie")
+
+        x_values: list[float] = []
+        y_values: list[float] = []
+        for phase in ("loading", "unloading"):
+            phase_points = sorted(point for point in grouped if point[0] == phase)
+            for _, point_idx in phase_points:
+                values = grouped[(phase, point_idx)]
+                avg_mass = statistics.mean(mass for mass, _ in values)
+                avg_resistance = statistics.mean(res for _, res in values)
+                x_values.append(avg_mass)
+                y_values.append(avg_resistance)
+                if phase == "unloading":
+                    unloading.append(avg_mass, avg_resistance)
+                else:
+                    loading.append(avg_mass, avg_resistance)
+
+        return self._finalize_xy_chart(
+            chart,
+            [loading, unloading],
+            x_values,
+            y_values,
+            "Obciazenie [g]",
+            "Rezystancja",
+        )
+
     def update_statistics_columns(self) -> None:
         mass_cells = stats_to_cells(self.mass_stats())
         resistance_cells = stats_to_cells(self.resistance_stats())
@@ -2502,6 +2721,8 @@ class PiezoTesterWindow(QMainWindow):
         data = parse_key_value_line(line)
         mode = data.get("mode", "standard")
         phase = data.get("phase", "none")
+        cycle = int(data.get("cycle", "0"))
+        phase_point = int(data.get("point", "0"))
         target_g = float(data.get("target_g", "0"))
         pwm_duty = int(float(data.get("pwm", "0")))
         pwm_percent = float(data.get("pwm_pct", "0"))
@@ -2513,6 +2734,8 @@ class PiezoTesterWindow(QMainWindow):
             idx=len(self.results) + 1,
             mode=mode,
             phase=phase,
+            cycle=cycle,
+            phase_point=phase_point,
             target_g=target_g,
             pwm_duty=pwm_duty,
             pwm_percent=pwm_percent,
@@ -2532,8 +2755,8 @@ class PiezoTesterWindow(QMainWindow):
             result.created_at.strftime("%Y-%m-%d"),
             result.created_at.strftime("%H:%M:%S"),
             str(result.idx),
-            "Hys+" if result.mode == "hysteresis" and result.phase == "loading" else
-            "Hys-" if result.mode == "hysteresis" and result.phase == "unloading" else
+            f"H{result.cycle + 1}+" if result.mode == "hysteresis" and result.phase == "loading" else
+            f"H{result.cycle + 1}-" if result.mode == "hysteresis" and result.phase == "unloading" else
             "Narast." if result.mode == "ramp" else "Std",
             "-" if result.mode == "standard" else f"{result.target_g:.1f}",
             f"{result.pwm_percent:.2f}",
@@ -2572,6 +2795,8 @@ class PiezoTesterWindow(QMainWindow):
                         "idx",
                         "mode",
                         "phase",
+                        "cycle",
+                        "point",
                         "target_g",
                         "pwm_duty",
                         "pwm_pct",
@@ -2590,6 +2815,8 @@ class PiezoTesterWindow(QMainWindow):
                     result.idx,
                     result.mode,
                     result.phase,
+                    result.cycle,
+                    result.phase_point,
                     "" if result.mode == "standard" else f"{result.target_g:.3f}",
                     result.pwm_duty,
                     f"{result.pwm_percent:.6f}",
@@ -2653,7 +2880,10 @@ class PiezoTesterWindow(QMainWindow):
                 loading_series.setName("Obciazanie")
                 unloading_series.setName("Odciazanie")
                 all_points = []
-                for result in hysteresis_results:
+                for result in sorted(
+                    hysteresis_results,
+                    key=lambda result: (result.cycle, 0 if result.phase == "loading" else 1, result.phase_point, result.idx),
+                ):
                     point = (float(result.mass_g), float(result.resistance))
                     all_points.append(point)
                     if result.phase == "unloading":
@@ -2768,8 +2998,7 @@ class PiezoTesterWindow(QMainWindow):
 
         return chart
 
-    def render_chart_pixmap(self, mode: int, size: QSize) -> QPixmap:
-        chart = self.build_chart(mode)
+    def render_chart_object_pixmap(self, chart: QChart, size: QSize) -> QPixmap:
         chart.resize(size.width(), size.height())
 
         scene = QGraphicsScene()
@@ -2786,6 +3015,10 @@ class PiezoTesterWindow(QMainWindow):
         painter.end()
         scene.removeItem(chart)
         return pixmap
+
+    def render_chart_pixmap(self, mode: int, size: QSize) -> QPixmap:
+        chart = self.build_chart(mode)
+        return self.render_chart_object_pixmap(chart, size)
 
     def build_trial_summary(self) -> TrialSummary | None:
         if not self.results or self.session_started_at is None:
@@ -2827,7 +3060,8 @@ class PiezoTesterWindow(QMainWindow):
                     writer.writerow(["Obciazenie wstepne [g]", f"{summary.test_settings.start_mass_g:.3f}"])
                     writer.writerow(["Obciazenie koncowe [g]", f"{summary.test_settings.end_mass_g:.3f}"])
                 if summary.test_settings.mode == "hysteresis":
-                    writer.writerow(["Punkty na galaz", str(summary.test_settings.sample_count)])
+                    writer.writerow(["Liczba cykli", str(summary.test_settings.sample_count)])
+                    writer.writerow(["Punkty na galaz", str(summary.test_settings.hysteresis_points)])
             writer.writerow([])
             writer.writerow(["Statystyki"])
             writer.writerow(["Parametr", "Srednia", "Min", "Max", "Odch. std."])
@@ -2846,6 +3080,8 @@ class PiezoTesterWindow(QMainWindow):
                     "idx",
                     "mode",
                     "phase",
+                    "cycle",
+                    "point",
                     "target_g",
                     "pwm_duty",
                     "pwm_pct",
@@ -2866,6 +3102,8 @@ class PiezoTesterWindow(QMainWindow):
                         result.idx,
                         result.mode,
                         result.phase,
+                        result.cycle,
+                        result.phase_point,
                         "" if result.mode == "standard" else f"{result.target_g:.6f}",
                         result.pwm_duty,
                         f"{result.pwm_percent:.6f}",
