@@ -67,6 +67,8 @@ class CalibrationStatus:
     sensor_raw: float = 0.0
     sensor_voltage: float = 0.0
     mag_points: int = 0
+    mag_model_min_g: float = 0.0
+    mag_model_max_g: float = 0.0
     mag_pre_valid: bool = False
     mag_move: int = 0
     mag_move_pct: float = 0.0
@@ -285,8 +287,9 @@ class DeviceClient:
 
 
 class TestSetupDialog(QDialog):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, status: CalibrationStatus, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.status = status
         self.setWindowTitle("Parametry testu")
         self.setModal(True)
 
@@ -371,6 +374,7 @@ class TestSetupDialog(QDialog):
 
         if mode == "ramp":
             self.sample_count_label.setText("Ilosc probek")
+            self.apply_ramp_defaults()
             self.mode_status_label.setText(
                 "Tryb narastajacy: ESP32 wyliczy przyblizony PWM dla punktu poczatkowego i koncowego, "
                 "a potem bedzie dopasowywac charakterystyke elektromagnesu na podstawie rzeczywistych pomiarow."
@@ -387,6 +391,18 @@ class TestSetupDialog(QDialog):
             self.mode_status_label.setText(
                 "Tryb standardowy: seria klasycznych pomiarow z pelnym pobudzeniem elektromagnesu."
             )
+
+    def apply_ramp_defaults(self) -> None:
+        if self.status.mag_points <= 0:
+            return
+
+        start_mass = max(0.0, self.status.mag_model_min_g)
+        end_mass = max(start_mass, self.status.mag_model_max_g)
+        if end_mass <= 0.0:
+            return
+
+        self.start_mass_spin.setValue(round(start_mass, 1))
+        self.end_mass_spin.setValue(round(end_mass, 1))
 
     def settings(self) -> TestSettings:
         mode = str(self.mode_combo.currentData())
@@ -2201,6 +2217,8 @@ class PiezoTesterWindow(QMainWindow):
                 sensor_raw=float(data.get("sensor_raw", "0")),
                 sensor_voltage=float(data.get("sensor_voltage", "0")),
                 mag_points=int(data.get("mag_points", "0")),
+                mag_model_min_g=float(data.get("mag_model_min_g", "0")),
+                mag_model_max_g=float(data.get("mag_model_max_g", "0")),
                 mag_pre_valid=data.get("mag_pre_valid", "0") == "1",
                 mag_move=int(data.get("mag_move", "0")),
                 mag_move_pct=float(data.get("mag_move_pct", "0")),
@@ -2228,7 +2246,8 @@ class PiezoTesterWindow(QMainWindow):
             QMessageBox.critical(self, "Test", "Najpierw polacz sie z urzadzeniem.")
             return
 
-        dialog = TestSetupDialog(self)
+        self.fetch_status()
+        dialog = TestSetupDialog(self.status, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 

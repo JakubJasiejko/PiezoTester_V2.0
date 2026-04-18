@@ -1940,6 +1940,22 @@ static const char *test_phase_to_text(uint8_t phase)
     return "none";
 }
 
+static float electromagnet_model_min_mass_g(void)
+{
+    if (g_electromagnet_model.point_count == 0) {
+        return 0.0f;
+    }
+    return g_electromagnet_model.mass_g[0];
+}
+
+static float electromagnet_model_max_mass_g(void)
+{
+    if (g_electromagnet_model.point_count == 0) {
+        return 0.0f;
+    }
+    return g_electromagnet_model.mass_g[g_electromagnet_model.point_count - 1];
+}
+
 static void send_status(void)
 {
     const float nominal_kg_per_v = load_cell_nominal_kg_per_v();
@@ -1953,7 +1969,7 @@ static void send_status(void)
         "STATUS calibrated=%d nominal_kg_per_v=%.9f kg_per_v=%.9f correction=%.9f "
         "cal_mass=%.6f nominal_mass=%.6f cal_signal=%.9f cal_zero=%.9f "
         "sensor_calibrated=%d sensor_factor=%.9f sensor_ref=%.6f sensor_raw=%.6f sensor_voltage=%.9f "
-        "mag_points=%u mag_pre_valid=%d mag_move=%u mag_move_pct=%.3f mag_contact=%u mag_contact_pct=%.3f mag_full_scale_g=%.3f mag_contact_count=%u mag_contact_start_pct=%.3f mag_contact_end_pct=%.3f mag_contact_states=%s "
+        "mag_points=%u mag_model_min_g=%.3f mag_model_max_g=%.3f mag_pre_valid=%d mag_move=%u mag_move_pct=%.3f mag_contact=%u mag_contact_pct=%.3f mag_full_scale_g=%.3f mag_contact_count=%u mag_contact_start_pct=%.3f mag_contact_end_pct=%.3f mag_contact_states=%s "
         "test_active=%d test_mode=%u test_samples=%u test_index=%u",
         g_calibration.valid ? 1 : 0,
         nominal_kg_per_v,
@@ -1969,6 +1985,8 @@ static void send_status(void)
         g_sensor_calibration.raw_resistance,
         g_sensor_calibration.measured_voltage,
         (unsigned)g_electromagnet_model.point_count,
+        electromagnet_model_min_mass_g(),
+        electromagnet_model_max_mass_g(),
         g_electromagnet_premodel.valid ? 1 : 0,
         (unsigned)electromagnet_premodel_move_duty(),
         move_threshold_pct,
