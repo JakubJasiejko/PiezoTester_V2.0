@@ -58,6 +58,7 @@ static const uint8_t ELECTROMAGNET_CONTACT_POINTS_VERSION = 1;
 #define FAST_ZERO_AVG_SAMPLES 4
 #define FAST_AVG_SAMPLES 4
 #define CAL_STAGE_MEASUREMENTS 4
+#define HYSTERESIS_BURST_SAMPLES 12
 
 typedef struct {
     bool valid;
@@ -90,12 +91,20 @@ typedef struct {
     float pwm_percent;
     uint32_t session_index;
     uint8_t mode;
+    uint8_t phase;
 } test_result_t;
 
 typedef enum {
     TEST_MODE_STANDARD = 0,
     TEST_MODE_RAMP = 1,
+    TEST_MODE_HYSTERESIS = 2,
 } test_mode_t;
+
+typedef enum {
+    TEST_PHASE_NONE = 0,
+    TEST_PHASE_LOADING = 1,
+    TEST_PHASE_UNLOADING = 2,
+} test_phase_t;
 
 typedef enum {
     CAL_STATE_IDLE = 0,
@@ -1536,6 +1545,7 @@ static test_result_t measure_test_sample(uint32_t pwm_duty, float target_mass_g,
     test_result_t result = {0};
 
     result.mode = (uint8_t)mode;
+    result.phase = (uint8_t)TEST_PHASE_NONE;
     result.target_mass_g = target_mass_g;
     result.pwm_duty = pwm_duty;
     result.pwm_percent = ((float)pwm_duty * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY;
@@ -1573,6 +1583,66 @@ static test_result_t measure_test_sample(uint32_t pwm_duty, float target_mass_g,
     return result;
 }
 
+static test_result_t measure_test_sample_burst(
+    uint32_t pwm_duty,
+    float target_mass_g,
+    test_mode_t mode,
+    test_phase_t phase,
+    uint32_t session_index
+)
+{
+    test_result_t result = {0};
+
+    result.mode = (uint8_t)mode;
+    result.phase = (uint8_t)phase;
+    result.target_mass_g = target_mass_g;
+    result.pwm_duty = pwm_duty;
+    result.pwm_percent = ((float)pwm_duty * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY;
+    result.session_index = session_index;
+
+    result.load_zero = ads1219_measure_configured(
+        ADS1219_MEAS_SINGLE_2,
+        ADS1219_GAIN_4,
+        ADS1219_DATA_RATE_1000SPS,
+        VREF_EXT,
+        ADS1219_VREF_EXTERNAL,
+        HYSTERESIS_BURST_SAMPLES
+    );
+    vTaskDelay(pdMS_TO_TICKS(5));
+
+    electromagnet_apply_duty(pwm_duty);
+    vTaskDelay(pdMS_TO_TICKS(ELECTROMAGNET_SETTLE_MS));
+
+    result.load_relative = ads1219_measure_configured(
+        ADS1219_MEAS_SINGLE_2,
+        ADS1219_GAIN_4,
+        ADS1219_DATA_RATE_1000SPS,
+        VREF_EXT,
+        ADS1219_VREF_EXTERNAL,
+        HYSTERESIS_BURST_SAMPLES
+    );
+    vTaskDelay(pdMS_TO_TICKS(5));
+    result.load_voltage = calculate_load_signal(result.load_zero, result.load_relative);
+    result.mass_kg = calculate_load(result.load_voltage);
+    result.mass_g = result.mass_kg * 1000.0f;
+
+    result.sensor_voltage = ads1219_measure_configured(
+        ADS1219_MEAS_DIFF_01,
+        ADS1219_GAIN_1,
+        ADS1219_DATA_RATE_1000SPS,
+        VREF_EXT,
+        ADS1219_VREF_EXTERNAL,
+        HYSTERESIS_BURST_SAMPLES
+    );
+    vTaskDelay(pdMS_TO_TICKS(5));
+    result.sensor_resistance = calculate_resistance(result.sensor_voltage);
+
+    electromagnet_off();
+    vTaskDelay(pdMS_TO_TICKS(ELECTROMAGNET_COOLDOWN_MS));
+
+    return result;
+}
+
 static float test_session_target_mass_g(uint16_t index)
 {
     if (!g_test_session.active || g_test_session.mode != TEST_MODE_RAMP) {
@@ -1585,6 +1655,51 @@ static float test_session_target_mass_g(uint16_t index)
 
     const float progress = (float)index / (float)(g_test_session.sample_count - 1U);
     return g_test_session.start_mass_g + (g_test_session.end_mass_g - g_test_session.start_mass_g) * progress;
+}
+
+static uint16_t test_session_total_steps(void)
+{
+    if (!g_test_session.active) {
+        return 0U;
+    }
+
+    if (g_test_session.mode == TEST_MODE_HYSTERESIS) {
+        return (uint16_t)(g_test_session.sample_count * 2U);
+    }
+
+    return g_test_session.sample_count;
+}
+
+static float test_session_hysteresis_target_mass_g(uint16_t index, test_phase_t *phase_out)
+{
+    if (phase_out != NULL) {
+        *phase_out = TEST_PHASE_NONE;
+    }
+
+    if (!g_test_session.active || g_test_session.mode != TEST_MODE_HYSTERESIS || g_test_session.sample_count == 0U) {
+        return 0.0f;
+    }
+
+    if (index < g_test_session.sample_count) {
+        if (phase_out != NULL) {
+            *phase_out = TEST_PHASE_LOADING;
+        }
+        if (g_test_session.sample_count <= 1U) {
+            return g_test_session.end_mass_g;
+        }
+        const float progress = (float)index / (float)(g_test_session.sample_count - 1U);
+        return g_test_session.start_mass_g + (g_test_session.end_mass_g - g_test_session.start_mass_g) * progress;
+    }
+
+    if (phase_out != NULL) {
+        *phase_out = TEST_PHASE_UNLOADING;
+    }
+    if (g_test_session.sample_count <= 1U) {
+        return g_test_session.start_mass_g;
+    }
+    const uint16_t down_index = (uint16_t)(index - g_test_session.sample_count);
+    const float progress = (float)down_index / (float)(g_test_session.sample_count - 1U);
+    return g_test_session.end_mass_g - (g_test_session.end_mass_g - g_test_session.start_mass_g) * progress;
 }
 
 static test_result_t run_targeted_ramp_sample(float target_mass_g, uint32_t initial_pwm_duty, uint32_t session_index)
@@ -1655,7 +1770,7 @@ static esp_err_t test_session_setup(test_mode_t mode, float start_mass_g, float 
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (mode == TEST_MODE_RAMP) {
+    if (mode == TEST_MODE_RAMP || mode == TEST_MODE_HYSTERESIS) {
         if (
             start_mass_g < 0.0f ||
             end_mass_g < 0.0f ||
@@ -1697,7 +1812,7 @@ static esp_err_t test_session_next(test_result_t *result_out)
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (g_test_session.current_index >= g_test_session.sample_count) {
+    if (g_test_session.current_index >= test_session_total_steps()) {
         return ESP_ERR_NOT_FINISHED;
     }
 
@@ -1718,13 +1833,25 @@ static esp_err_t test_session_next(test_result_t *result_out)
         }
 
         result = run_targeted_ramp_sample(target_mass_g, estimated_pwm, session_index);
+    } else if (g_test_session.mode == TEST_MODE_HYSTERESIS) {
+        test_phase_t phase = TEST_PHASE_NONE;
+        const float target_mass_g = test_session_hysteresis_target_mass_g(g_test_session.current_index, &phase);
+        const uint32_t estimated_pwm = electromagnet_estimate_pwm_for_mass(target_mass_g);
+        result = measure_test_sample_burst(
+            estimated_pwm,
+            target_mass_g,
+            TEST_MODE_HYSTERESIS,
+            phase,
+            session_index
+        );
+        electromagnet_model_upsert_point(result.mass_g, result.pwm_duty);
     } else {
         result = measure_test_sample(ELECTROMAGNET_PWM_MAX_DUTY, 0.0f, TEST_MODE_STANDARD, session_index);
         electromagnet_model_upsert_point(result.mass_g, result.pwm_duty);
     }
 
     g_test_session.current_index++;
-    if (g_test_session.current_index >= g_test_session.sample_count) {
+    if (g_test_session.current_index >= test_session_total_steps()) {
         g_test_session.active = false;
     }
 
@@ -1735,6 +1862,28 @@ static esp_err_t test_session_next(test_result_t *result_out)
 static test_result_t run_test_once(void)
 {
     return measure_test_sample(ELECTROMAGNET_PWM_MAX_DUTY, 0.0f, TEST_MODE_STANDARD, g_test_counter);
+}
+
+static const char *test_mode_to_text(test_mode_t mode)
+{
+    if (mode == TEST_MODE_RAMP) {
+        return "ramp";
+    }
+    if (mode == TEST_MODE_HYSTERESIS) {
+        return "hysteresis";
+    }
+    return "standard";
+}
+
+static const char *test_phase_to_text(uint8_t phase)
+{
+    if (phase == TEST_PHASE_LOADING) {
+        return "loading";
+    }
+    if (phase == TEST_PHASE_UNLOADING) {
+        return "unloading";
+    }
+    return "none";
 }
 
 static void send_status(void)
@@ -2224,6 +2373,8 @@ static void handle_command(const char *line)
         test_mode_t mode = TEST_MODE_STANDARD;
         if (strcmp(mode_text, "ramp") == 0) {
             mode = TEST_MODE_RAMP;
+        } else if (strcmp(mode_text, "hysteresis") == 0) {
+            mode = TEST_MODE_HYSTERESIS;
         } else if (strcmp(mode_text, "standard") != 0) {
             write_line("ERR test_setup_invalid_mode");
             return;
@@ -2237,7 +2388,7 @@ static void handle_command(const char *line)
 
         writef(
             "TEST_SETUP_OK mode=%s samples=%u start_g=%.3f end_g=%.3f start_pwm=%u end_pwm=%u",
-            (mode == TEST_MODE_RAMP) ? "ramp" : "standard",
+            test_mode_to_text(mode),
             sample_count,
             g_test_session.start_mass_g,
             g_test_session.end_mass_g,
@@ -2260,9 +2411,10 @@ static void handle_command(const char *line)
         }
 
         writef(
-            "TEST_RESULT idx=%lu mode=%s target_g=%.3f pwm=%u pwm_pct=%.3f load_v=%.9f zero_v=%.9f relative_v=%.9f mass_g=%.3f resistance=%.3f sensor_v=%.9f",
+            "TEST_RESULT idx=%lu mode=%s phase=%s target_g=%.3f pwm=%u pwm_pct=%.3f load_v=%.9f zero_v=%.9f relative_v=%.9f mass_g=%.3f resistance=%.3f sensor_v=%.9f",
             (unsigned long)g_test_counter++,
-            (result.mode == TEST_MODE_RAMP) ? "ramp" : "standard",
+            test_mode_to_text((test_mode_t)result.mode),
+            test_phase_to_text(result.phase),
             result.target_mass_g,
             (unsigned)result.pwm_duty,
             result.pwm_percent,
@@ -2285,7 +2437,7 @@ static void handle_command(const char *line)
     if (strcmp(line, "TEST") == 0) {
         const test_result_t result = run_test_once();
         writef(
-            "TEST_RESULT idx=%lu mode=standard target_g=0.000 pwm=%u pwm_pct=%.3f load_v=%.9f zero_v=%.9f relative_v=%.9f mass_g=%.3f resistance=%.3f sensor_v=%.9f",
+            "TEST_RESULT idx=%lu mode=standard phase=none target_g=0.000 pwm=%u pwm_pct=%.3f load_v=%.9f zero_v=%.9f relative_v=%.9f mass_g=%.3f resistance=%.3f sensor_v=%.9f",
             (unsigned long)g_test_counter++,
             (unsigned)result.pwm_duty,
             result.pwm_percent,
