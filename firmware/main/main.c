@@ -1110,7 +1110,7 @@ static void write_line(const char *text)
 
 static void writef(const char *fmt, ...)
 {
-    char buffer[512];
+    char buffer[1024];
     va_list args;
 
     va_start(args, fmt);
