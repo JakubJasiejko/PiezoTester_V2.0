@@ -378,6 +378,8 @@ class CalibrationDialog(QDialog):
         self.finished = False
         self.preview_busy = False
         self.preview_auto_attempted = False
+        self.preview_suspended = False
+        self.preview_generation = 0
         self.preview_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.preview_message = "Inicjalizacja ciaglego podgladu masy..."
 
@@ -508,6 +510,8 @@ class CalibrationDialog(QDialog):
         self.reference_mass_edit.setEnabled(self.step in (0, 2) and not controls_locked and not self.finished)
 
     def process_preview_cycle(self) -> None:
+        if self.preview_suspended:
+            return
         self.process_preview_queue()
         if not self.preview_busy:
             self.refresh_live_preview()
@@ -515,7 +519,9 @@ class CalibrationDialog(QDialog):
     def process_preview_queue(self) -> None:
         try:
             while True:
-                event, payload = self.preview_queue.get_nowait()
+                event, generation, payload = self.preview_queue.get_nowait()
+                if generation != self.preview_generation:
+                    continue
                 self.preview_busy = False
                 self.refresh_button_states()
 
@@ -536,16 +542,30 @@ class CalibrationDialog(QDialog):
             return
 
     def ensure_live_preview_started(self) -> None:
-        if not self.app.client.is_connected() or self.preview_busy or self.busy:
+        if not self.app.client.is_connected() or self.preview_busy or self.busy or self.preview_suspended:
             return
         self.start_load_tare(background=True, auto=True)
 
+    def suspend_preview(self) -> None:
+        self.preview_suspended = True
+        self.preview_generation += 1
+        self.preview_busy = False
+        self.preview_timer.stop()
+        self.refresh_button_states()
+
+    def resume_preview(self) -> None:
+        self.preview_suspended = False
+        self.preview_timer.start(1000)
+        self.refresh_button_states()
+        QTimer.singleShot(150, self.ensure_live_preview_started)
+
     def start_load_tare(self, background: bool, auto: bool = False) -> None:
-        if self.preview_busy or self.busy:
+        if self.preview_busy or self.busy or self.preview_suspended:
             return
 
         self.preview_busy = True
         self.refresh_button_states()
+        generation = self.preview_generation
 
         if auto:
             self.preview_auto_attempted = True
@@ -557,18 +577,18 @@ class CalibrationDialog(QDialog):
         if not background:
             try:
                 line = self.app.run_load_tare()
-                self.preview_queue.put(("tare_ok", line))
+                self.preview_queue.put(("tare_ok", generation, line))
             except Exception as exc:
-                self.preview_queue.put(("tare_err", str(exc)))
+                self.preview_queue.put(("tare_err", generation, str(exc)))
             self.process_preview_queue()
             return
 
         def worker() -> None:
             try:
                 line = self.app.run_load_tare()
-                self.preview_queue.put(("tare_ok", line))
+                self.preview_queue.put(("tare_ok", generation, line))
             except Exception as exc:
-                self.preview_queue.put(("tare_err", str(exc)))
+                self.preview_queue.put(("tare_err", generation, str(exc)))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -658,11 +678,13 @@ class CalibrationDialog(QDialog):
             current_step = self.step
 
             if current_step == 1:
+                self.suspend_preview()
                 self.live_status_label.setText("Zapisywanie zera kalibracyjnego... to moze potrwac kilkadziesiat sekund.")
                 QApplication.processEvents()
                 self.app.run_calibration_zero()
                 self.set_step(2)
                 self.preview_message = "Zero kalibracyjne zapisane. Poloz znana mase i obserwuj aktualna wartosc."
+                self.resume_preview()
                 self.refresh_live_preview(force=True)
                 return
 
@@ -697,6 +719,8 @@ class CalibrationDialog(QDialog):
             QMessageBox.critical(self, "Kalibracja", str(exc))
         finally:
             if not self.finished:
+                if self.preview_suspended and self.step != 99:
+                    self.resume_preview()
                 self.set_busy(False)
 
     def run_sensor_calibration(self) -> None:
@@ -736,10 +760,12 @@ class CalibrationDialog(QDialog):
     def open_advanced_calibration(self) -> None:
         if self.busy or self.preview_busy:
             return
+        self.suspend_preview()
         self.app.fetch_status()
         dialog = AdvancedCalibrationDialog(self.app)
         dialog.exec()
         self.app.fetch_status()
+        self.resume_preview()
         self.refresh_sensor_status()
         self.refresh_live_preview(force=True)
 
