@@ -2016,11 +2016,15 @@ class PiezoTesterWindow(QMainWindow):
         self.console.appendPlainText(f"{datetime.now():%H:%M:%S} | {message}")
 
     def refresh_ports(self) -> None:
-        ports = [port.device for port in serial.tools.list_ports.comports()]
+        discovered_ports = [port.device for port in serial.tools.list_ports.comports()]
+        usb_ports = [port for port in discovered_ports if port.startswith("/dev/ttyUSB")]
+        ports = usb_ports if usb_ports else discovered_ports
         current = self.port_combo.currentText()
         self.port_combo.clear()
         self.port_combo.addItems(ports)
-        if current in ports:
+        if len(ports) == 1:
+            self.port_combo.setCurrentIndex(0)
+        elif current in ports:
             self.port_combo.setCurrentText(current)
 
     def connect_device(self) -> None:
