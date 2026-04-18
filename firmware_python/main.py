@@ -1150,10 +1150,12 @@ class AdvancedCalibrationDialog(QDialog):
         self.sync_from_status()
 
     def autosave_contact_thresholds(self, pwm_pct: float) -> str:
+        desired_state = self.contact_point_states[pwm_pct]
         self.ensure_contact_config_synced()
+        self.contact_point_states[pwm_pct] = desired_state
         line = self.app.run_magnet_contact_point_set(
             slot=self.contact_pwm_points.index(pwm_pct),
-            state=self.contact_point_states[pwm_pct],
+            state=desired_state,
             full_scale_g=self.app.status.mag_full_scale_g if self.app.status.mag_full_scale_g > 0 else 5000.0,
         )
         self.app.fetch_status()
