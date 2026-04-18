@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
 
 BAUDRATE = 115200
 CALIBRATION_STAGE_TIMEOUT = 90.0
+HYSTERESIS_TRACE_POINTS = 24
 APP_DIR = Path(__file__).resolve().parent
 LOG_DIR = APP_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)
@@ -308,31 +309,35 @@ class TestSetupDialog(QDialog):
         self.mode_combo.currentIndexChanged.connect(self.update_mode_state)
         form.addRow("Typ testu", self.mode_combo)
 
+        self.sample_count_label = QLabel("Ilosc probek")
         self.sample_count_spin = QSpinBox()
         self.sample_count_spin.setRange(1, 500)
         self.sample_count_spin.setValue(10)
-        form.addRow("Ilosc probek", self.sample_count_spin)
+        form.addRow(self.sample_count_label, self.sample_count_spin)
 
+        self.start_mass_label = QLabel("Obciazenie wstepne")
         self.start_mass_spin = QDoubleSpinBox()
         self.start_mass_spin.setRange(0.0, 5000.0)
         self.start_mass_spin.setDecimals(1)
         self.start_mass_spin.setSingleStep(25.0)
         self.start_mass_spin.setSuffix(" g")
         self.start_mass_spin.setValue(100.0)
-        form.addRow("Obciazenie wstepne", self.start_mass_spin)
+        form.addRow(self.start_mass_label, self.start_mass_spin)
 
+        self.end_mass_label = QLabel("Obciazenie koncowe")
         self.end_mass_spin = QDoubleSpinBox()
         self.end_mass_spin.setRange(0.0, 5000.0)
         self.end_mass_spin.setDecimals(1)
         self.end_mass_spin.setSingleStep(25.0)
         self.end_mass_spin.setSuffix(" g")
         self.end_mass_spin.setValue(1000.0)
-        form.addRow("Obciazenie koncowe", self.end_mass_spin)
+        form.addRow(self.end_mass_label, self.end_mass_spin)
 
+        self.hysteresis_points_label = QLabel("Punkty na galaz")
         self.hysteresis_points_spin = QSpinBox()
         self.hysteresis_points_spin.setRange(2, 500)
-        self.hysteresis_points_spin.setValue(10)
-        form.addRow("Punkty na galaz", self.hysteresis_points_spin)
+        self.hysteresis_points_spin.setValue(HYSTERESIS_TRACE_POINTS)
+        form.addRow(self.hysteresis_points_label, self.hysteresis_points_spin)
 
         layout.addLayout(form)
 
@@ -354,36 +359,45 @@ class TestSetupDialog(QDialog):
 
     def update_mode_state(self) -> None:
         mode = self.mode_combo.currentData()
-        has_load_range = mode in {"ramp", "hysteresis"}
+        has_load_range = mode == "ramp"
         self.start_mass_spin.setEnabled(has_load_range)
         self.end_mass_spin.setEnabled(has_load_range)
-        self.hysteresis_points_spin.setEnabled(mode == "hysteresis")
+        self.start_mass_label.setVisible(has_load_range)
+        self.start_mass_spin.setVisible(has_load_range)
+        self.end_mass_label.setVisible(has_load_range)
+        self.end_mass_spin.setVisible(has_load_range)
+        self.hysteresis_points_label.setVisible(False)
+        self.hysteresis_points_spin.setVisible(False)
 
         if mode == "ramp":
+            self.sample_count_label.setText("Ilosc probek")
             self.mode_status_label.setText(
                 "Tryb narastajacy: ESP32 wyliczy przyblizony PWM dla punktu poczatkowego i koncowego, "
                 "a potem bedzie dopasowywac charakterystyke elektromagnesu na podstawie rzeczywistych pomiarow."
             )
         elif mode == "hysteresis":
+            self.sample_count_label.setText("Ilosc pomiarow")
             self.mode_status_label.setText(
-                "Tryb histerezy: urzadzenie wykona przebieg obciazania i odciazania, "
-                "zapisujac dwie galezie charakterystyki do wykresu histerezy."
+                "Tryb histerezy: 1 pomiar to pelny cykl obciazenie i odciazenie. "
+                "ESP32 wykona szybki burst podczas obciazania i drugi podczas odciazania, "
+                "tworzac dodatnia i ujemna galaz histerezy dla kazdego pomiaru."
             )
         else:
+            self.sample_count_label.setText("Ilosc probek")
             self.mode_status_label.setText(
                 "Tryb standardowy: seria klasycznych pomiarow z pelnym pobudzeniem elektromagnesu."
             )
 
     def settings(self) -> TestSettings:
         mode = str(self.mode_combo.currentData())
-        start_mass_g = self.start_mass_spin.value() if mode in {"ramp", "hysteresis"} else 0.0
-        end_mass_g = self.end_mass_spin.value() if mode in {"ramp", "hysteresis"} else 0.0
+        start_mass_g = self.start_mass_spin.value() if mode == "ramp" else 0.0
+        end_mass_g = self.end_mass_spin.value() if mode == "ramp" else 0.0
         return TestSettings(
             mode=mode,
             sample_count=self.sample_count_spin.value(),
             start_mass_g=start_mass_g,
             end_mass_g=end_mass_g,
-            hysteresis_points=self.hysteresis_points_spin.value() if mode == "hysteresis" else 0,
+            hysteresis_points=HYSTERESIS_TRACE_POINTS if mode == "hysteresis" else 0,
         )
 
     def accept(self) -> None:
@@ -391,11 +405,8 @@ class TestSetupDialog(QDialog):
         if settings.sample_count <= 0:
             QMessageBox.critical(self, "Test", "Ilosc probek musi byc wieksza od zera.")
             return
-        if settings.mode in {"ramp", "hysteresis"} and settings.end_mass_g < settings.start_mass_g:
+        if settings.mode == "ramp" and settings.end_mass_g < settings.start_mass_g:
             QMessageBox.critical(self, "Test", "Obciazenie koncowe nie moze byc mniejsze od wstepnego.")
-            return
-        if settings.mode == "hysteresis" and settings.hysteresis_points < 2:
-            QMessageBox.critical(self, "Test", "Dla histerezy podaj co najmniej 2 punkty na galaz.")
             return
         super().accept()
 
@@ -1417,12 +1428,11 @@ class TrialSummaryDialog(QDialog):
         if self.summary.test_settings is not None:
             settings = self.summary.test_settings
             info_form.addRow("Typ testu", QLabel(mode_label(settings.mode)))
-            if settings.mode in {"ramp", "hysteresis"}:
+            if settings.mode == "ramp":
                 info_form.addRow("Obciazenie wstepne", QLabel(f"{settings.start_mass_g:.1f} g"))
                 info_form.addRow("Obciazenie koncowe", QLabel(f"{settings.end_mass_g:.1f} g"))
-                if settings.mode == "hysteresis":
-                    info_form.addRow("Liczba cykli", QLabel(str(settings.sample_count)))
-                    info_form.addRow("Punkty na galaz", QLabel(str(settings.hysteresis_points)))
+            if settings.mode == "hysteresis":
+                info_form.addRow("Ilosc pomiarow", QLabel(str(settings.sample_count)))
 
         session_csv_label = QLabel(str(self.summary.csv_log_path))
         session_csv_label.setWordWrap(True)
@@ -1806,12 +1816,11 @@ class TrialSummaryDialog(QDialog):
             if self.summary.test_settings is not None:
                 settings = self.summary.test_settings
                 info_items.append(("Typ testu", mode_label(settings.mode)))
-                if settings.mode in {"ramp", "hysteresis"}:
+                if settings.mode == "ramp":
                     info_items.append(("Obciazenie start", f"{settings.start_mass_g:.1f} g"))
                     info_items.append(("Obciazenie koniec", f"{settings.end_mass_g:.1f} g"))
                 if settings.mode == "hysteresis":
-                    info_items.append(("Liczba cykli", str(settings.sample_count)))
-                    info_items.append(("Punkty na galaz", str(settings.hysteresis_points)))
+                    info_items.append(("Ilosc pomiarow", str(settings.sample_count)))
 
             info_rows = max(1, (len(info_items) + 1) // 2)
             info_height = 44 + info_rows * 48
@@ -2463,8 +2472,7 @@ class PiezoTesterWindow(QMainWindow):
         elif settings.mode == "hysteresis":
             self.log(
                 f"Uruchomiono test histerezy: start={settings.start_mass_g:.1f} g, "
-                f"koniec={settings.end_mass_g:.1f} g, cykle={settings.sample_count}, "
-                f"punkty na galaz={settings.hysteresis_points}."
+                f"pelnych cykli obciazenie-odciazenie={settings.sample_count}."
             )
         else:
             self.log(f"Uruchomiono test standardowy: probki={settings.sample_count}.")
@@ -2758,7 +2766,7 @@ class PiezoTesterWindow(QMainWindow):
             f"H{result.cycle + 1}+" if result.mode == "hysteresis" and result.phase == "loading" else
             f"H{result.cycle + 1}-" if result.mode == "hysteresis" and result.phase == "unloading" else
             "Narast." if result.mode == "ramp" else "Std",
-            "-" if result.mode == "standard" else f"{result.target_g:.1f}",
+            "-" if result.mode in {"standard", "hysteresis"} else f"{result.target_g:.1f}",
             f"{result.pwm_percent:.2f}",
             "BLEDNA KAL" if math.isnan(result.mass_g) else f"{result.mass_g:.3f}",
             "BLEDNY ODCZYT" if math.isnan(result.resistance) else f"{result.resistance:.3f}",
@@ -2817,7 +2825,7 @@ class PiezoTesterWindow(QMainWindow):
                     result.phase,
                     result.cycle,
                     result.phase_point,
-                    "" if result.mode == "standard" else f"{result.target_g:.3f}",
+                    "" if result.mode in {"standard", "hysteresis"} else f"{result.target_g:.3f}",
                     result.pwm_duty,
                     f"{result.pwm_percent:.6f}",
                     "" if math.isnan(result.mass_g) else f"{result.mass_g:.6f}",
@@ -3056,12 +3064,11 @@ class PiezoTesterWindow(QMainWindow):
             writer.writerow(["Liczba probek", summary.sample_count])
             if summary.test_settings is not None:
                 writer.writerow(["Typ testu", summary.test_settings.mode])
-                if summary.test_settings.mode in {"ramp", "hysteresis"}:
+                if summary.test_settings.mode == "ramp":
                     writer.writerow(["Obciazenie wstepne [g]", f"{summary.test_settings.start_mass_g:.3f}"])
                     writer.writerow(["Obciazenie koncowe [g]", f"{summary.test_settings.end_mass_g:.3f}"])
                 if summary.test_settings.mode == "hysteresis":
-                    writer.writerow(["Liczba cykli", str(summary.test_settings.sample_count)])
-                    writer.writerow(["Punkty na galaz", str(summary.test_settings.hysteresis_points)])
+                    writer.writerow(["Ilosc pomiarow", str(summary.test_settings.sample_count)])
             writer.writerow([])
             writer.writerow(["Statystyki"])
             writer.writerow(["Parametr", "Srednia", "Min", "Max", "Odch. std."])
@@ -3104,7 +3111,7 @@ class PiezoTesterWindow(QMainWindow):
                         result.phase,
                         result.cycle,
                         result.phase_point,
-                        "" if result.mode == "standard" else f"{result.target_g:.6f}",
+                        "" if result.mode in {"standard", "hysteresis"} else f"{result.target_g:.6f}",
                         result.pwm_duty,
                         f"{result.pwm_percent:.6f}",
                         "" if math.isnan(result.mass_g) else f"{result.mass_g:.6f}",

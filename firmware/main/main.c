@@ -59,6 +59,8 @@ static const uint8_t ELECTROMAGNET_CONTACT_POINTS_VERSION = 1;
 #define FAST_AVG_SAMPLES 4
 #define CAL_STAGE_MEASUREMENTS 4
 #define HYSTERESIS_BURST_SAMPLES 12
+#define HYSTERESIS_TRACE_POINTS 24
+#define HYSTERESIS_TRACE_INTERVAL_MS 2
 
 typedef struct {
     bool valid;
@@ -145,6 +147,11 @@ typedef struct {
     float end_mass_g;
     uint32_t start_pwm_duty;
     uint32_t end_pwm_duty;
+    uint16_t hysteresis_trace_count;
+    uint16_t hysteresis_trace_index;
+    uint16_t hysteresis_trace_cycle;
+    bool hysteresis_trace_ready;
+    test_result_t hysteresis_trace[(HYSTERESIS_TRACE_POINTS * 2U)];
 } test_session_t;
 
 static calibration_data_t g_calibration = {
@@ -1586,10 +1593,9 @@ static test_result_t measure_test_sample(uint32_t pwm_duty, float target_mass_g,
     return result;
 }
 
-static test_result_t measure_test_sample_burst(
+static test_result_t measure_hysteresis_trace_sample(
     uint32_t pwm_duty,
-    float target_mass_g,
-    test_mode_t mode,
+    float zero_reference,
     test_phase_t phase,
     uint32_t session_index,
     uint16_t cycle_index,
@@ -1598,27 +1604,15 @@ static test_result_t measure_test_sample_burst(
 {
     test_result_t result = {0};
 
-    result.mode = (uint8_t)mode;
+    result.mode = (uint8_t)TEST_MODE_HYSTERESIS;
     result.phase = (uint8_t)phase;
     result.cycle_index = cycle_index;
     result.phase_point = phase_point;
-    result.target_mass_g = target_mass_g;
+    result.target_mass_g = 0.0f;
     result.pwm_duty = pwm_duty;
     result.pwm_percent = ((float)pwm_duty * 100.0f) / (float)ELECTROMAGNET_PWM_MAX_DUTY;
     result.session_index = session_index;
-
-    result.load_zero = ads1219_measure_configured(
-        ADS1219_MEAS_SINGLE_2,
-        ADS1219_GAIN_4,
-        ADS1219_DATA_RATE_1000SPS,
-        VREF_EXT,
-        ADS1219_VREF_EXTERNAL,
-        HYSTERESIS_BURST_SAMPLES
-    );
-    vTaskDelay(pdMS_TO_TICKS(5));
-
-    electromagnet_apply_duty(pwm_duty);
-    vTaskDelay(pdMS_TO_TICKS(ELECTROMAGNET_SETTLE_MS));
+    result.load_zero = zero_reference;
 
     result.load_relative = ads1219_measure_configured(
         ADS1219_MEAS_SINGLE_2,
@@ -1626,9 +1620,8 @@ static test_result_t measure_test_sample_burst(
         ADS1219_DATA_RATE_1000SPS,
         VREF_EXT,
         ADS1219_VREF_EXTERNAL,
-        HYSTERESIS_BURST_SAMPLES
+        1
     );
-    vTaskDelay(pdMS_TO_TICKS(5));
     result.load_voltage = calculate_load_signal(result.load_zero, result.load_relative);
     result.mass_kg = calculate_load(result.load_voltage);
     result.mass_g = result.mass_kg * 1000.0f;
@@ -1639,13 +1632,9 @@ static test_result_t measure_test_sample_burst(
         ADS1219_DATA_RATE_1000SPS,
         VREF_EXT,
         ADS1219_VREF_EXTERNAL,
-        HYSTERESIS_BURST_SAMPLES
+        1
     );
-    vTaskDelay(pdMS_TO_TICKS(5));
     result.sensor_resistance = calculate_resistance(result.sensor_voltage);
-
-    electromagnet_off();
-    vTaskDelay(pdMS_TO_TICKS(ELECTROMAGNET_COOLDOWN_MS));
 
     return result;
 }
@@ -1671,64 +1660,63 @@ static uint16_t test_session_total_steps(void)
     }
 
     if (g_test_session.mode == TEST_MODE_HYSTERESIS) {
-        return (uint16_t)(g_test_session.sample_count * g_test_session.hysteresis_points * 2U);
+        return (uint16_t)(g_test_session.sample_count * HYSTERESIS_TRACE_POINTS * 2U);
     }
 
     return g_test_session.sample_count;
 }
 
-static float test_session_hysteresis_target_mass_g(
-    uint16_t index,
-    test_phase_t *phase_out,
-    uint16_t *cycle_index_out,
-    uint16_t *phase_point_out
-)
+static esp_err_t test_session_prepare_hysteresis_cycle(uint16_t cycle_index)
 {
-    if (phase_out != NULL) {
-        *phase_out = TEST_PHASE_NONE;
-    }
-    if (cycle_index_out != NULL) {
-        *cycle_index_out = 0U;
-    }
-    if (phase_point_out != NULL) {
-        *phase_point_out = 0U;
+    if (!g_test_session.active || g_test_session.mode != TEST_MODE_HYSTERESIS) {
+        return ESP_ERR_INVALID_STATE;
     }
 
-    if (
-        !g_test_session.active ||
-        g_test_session.mode != TEST_MODE_HYSTERESIS ||
-        g_test_session.sample_count == 0U ||
-        g_test_session.hysteresis_points == 0U
-    ) {
-        return 0.0f;
+    const uint16_t trace_points = HYSTERESIS_TRACE_POINTS;
+    const float zero_reference = ads1219_measure_configured(
+        ADS1219_MEAS_SINGLE_2,
+        ADS1219_GAIN_4,
+        ADS1219_DATA_RATE_1000SPS,
+        VREF_EXT,
+        ADS1219_VREF_EXTERNAL,
+        FAST_ZERO_AVG_SAMPLES
+    );
+    if (!isfinite(zero_reference)) {
+        return ESP_FAIL;
     }
 
-    const uint16_t branch_points = g_test_session.hysteresis_points;
-    const uint16_t cycle_span = (uint16_t)(branch_points * 2U);
-    const uint16_t cycle_index = (uint16_t)(index / cycle_span);
-    const uint16_t cycle_offset = (uint16_t)(index % cycle_span);
-    const bool unloading = cycle_offset >= branch_points;
-    const uint16_t phase_point = unloading ? (uint16_t)(cycle_offset - branch_points) : cycle_offset;
-
-    if (cycle_index_out != NULL) {
-        *cycle_index_out = cycle_index;
-    }
-    if (phase_point_out != NULL) {
-        *phase_point_out = phase_point;
-    }
-    if (phase_out != NULL) {
-        *phase_out = unloading ? TEST_PHASE_UNLOADING : TEST_PHASE_LOADING;
+    electromagnet_apply_duty(ELECTROMAGNET_PWM_MAX_DUTY);
+    for (uint16_t point = 0; point < trace_points; ++point) {
+        g_test_session.hysteresis_trace[point] = measure_hysteresis_trace_sample(
+            ELECTROMAGNET_PWM_MAX_DUTY,
+            zero_reference,
+            TEST_PHASE_LOADING,
+            (uint32_t)(cycle_index * trace_points * 2U + point),
+            cycle_index,
+            point
+        );
+        vTaskDelay(pdMS_TO_TICKS(HYSTERESIS_TRACE_INTERVAL_MS));
     }
 
-    if (branch_points <= 1U) {
-        return unloading ? g_test_session.start_mass_g : g_test_session.end_mass_g;
+    electromagnet_off();
+    for (uint16_t point = 0; point < trace_points; ++point) {
+        g_test_session.hysteresis_trace[trace_points + point] = measure_hysteresis_trace_sample(
+            0U,
+            zero_reference,
+            TEST_PHASE_UNLOADING,
+            (uint32_t)(cycle_index * trace_points * 2U + trace_points + point),
+            cycle_index,
+            point
+        );
+        vTaskDelay(pdMS_TO_TICKS(HYSTERESIS_TRACE_INTERVAL_MS));
     }
 
-    const float progress = (float)phase_point / (float)(branch_points - 1U);
-    if (unloading) {
-        return g_test_session.end_mass_g - (g_test_session.end_mass_g - g_test_session.start_mass_g) * progress;
-    }
-    return g_test_session.start_mass_g + (g_test_session.end_mass_g - g_test_session.start_mass_g) * progress;
+    vTaskDelay(pdMS_TO_TICKS(ELECTROMAGNET_COOLDOWN_MS));
+    g_test_session.hysteresis_trace_count = (uint16_t)(trace_points * 2U);
+    g_test_session.hysteresis_trace_index = 0U;
+    g_test_session.hysteresis_trace_cycle = cycle_index;
+    g_test_session.hysteresis_trace_ready = true;
+    return ESP_OK;
 }
 
 static test_result_t run_targeted_ramp_sample(float target_mass_g, uint32_t initial_pwm_duty, uint32_t session_index)
@@ -1806,10 +1794,10 @@ static esp_err_t test_session_setup(
     }
 
     if (mode == TEST_MODE_HYSTERESIS && hysteresis_points < 2U) {
-        return ESP_ERR_INVALID_ARG;
+        hysteresis_points = HYSTERESIS_TRACE_POINTS;
     }
 
-    if (mode == TEST_MODE_RAMP || mode == TEST_MODE_HYSTERESIS) {
+    if (mode == TEST_MODE_RAMP) {
         if (
             start_mass_g < 0.0f ||
             end_mass_g < 0.0f ||
@@ -1828,7 +1816,7 @@ static esp_err_t test_session_setup(
     g_test_session.active = true;
     g_test_session.mode = mode;
     g_test_session.sample_count = sample_count;
-    g_test_session.hysteresis_points = (mode == TEST_MODE_HYSTERESIS) ? hysteresis_points : 0U;
+    g_test_session.hysteresis_points = (mode == TEST_MODE_HYSTERESIS) ? HYSTERESIS_TRACE_POINTS : 0U;
     g_test_session.start_mass_g = start_mass_g;
     g_test_session.end_mass_g = end_mass_g;
     g_test_session.start_pwm_duty = electromagnet_estimate_pwm_for_mass(start_mass_g);
@@ -1874,26 +1862,30 @@ static esp_err_t test_session_next(test_result_t *result_out)
 
         result = run_targeted_ramp_sample(target_mass_g, estimated_pwm, session_index);
     } else if (g_test_session.mode == TEST_MODE_HYSTERESIS) {
-        test_phase_t phase = TEST_PHASE_NONE;
-        uint16_t cycle_index = 0U;
-        uint16_t phase_point = 0U;
-        const float target_mass_g = test_session_hysteresis_target_mass_g(
-            g_test_session.current_index,
-            &phase,
-            &cycle_index,
-            &phase_point
-        );
-        const uint32_t estimated_pwm = electromagnet_estimate_pwm_for_mass(target_mass_g);
-        result = measure_test_sample_burst(
-            estimated_pwm,
-            target_mass_g,
-            TEST_MODE_HYSTERESIS,
-            phase,
-            session_index,
-            cycle_index,
-            phase_point
-        );
-        electromagnet_model_upsert_point(result.mass_g, result.pwm_duty);
+        const uint16_t cycle_span = (uint16_t)(HYSTERESIS_TRACE_POINTS * 2U);
+        const uint16_t cycle_index = (uint16_t)(g_test_session.current_index / cycle_span);
+
+        if (!g_test_session.hysteresis_trace_ready || g_test_session.hysteresis_trace_cycle != cycle_index) {
+            const esp_err_t prep_err = test_session_prepare_hysteresis_cycle(cycle_index);
+            if (prep_err != ESP_OK) {
+                return prep_err;
+            }
+        }
+
+        if (g_test_session.hysteresis_trace_index >= g_test_session.hysteresis_trace_count) {
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        result = g_test_session.hysteresis_trace[g_test_session.hysteresis_trace_index++];
+        result.session_index = session_index;
+        if (result.pwm_duty > 0U) {
+            electromagnet_model_upsert_point(result.mass_g, result.pwm_duty);
+        }
+        if (g_test_session.hysteresis_trace_index >= g_test_session.hysteresis_trace_count) {
+            g_test_session.hysteresis_trace_ready = false;
+            g_test_session.hysteresis_trace_index = 0U;
+            g_test_session.hysteresis_trace_count = 0U;
+        }
     } else {
         result = measure_test_sample(ELECTROMAGNET_PWM_MAX_DUTY, 0.0f, TEST_MODE_STANDARD, session_index);
         electromagnet_model_upsert_point(result.mass_g, result.pwm_duty);
@@ -2436,8 +2428,7 @@ static void handle_command(const char *line)
         }
 
         if (mode == TEST_MODE_HYSTERESIS && !parse_u32_argument(line, "points", &hysteresis_points)) {
-            write_line("ERR test_setup_invalid_points");
-            return;
+            hysteresis_points = HYSTERESIS_TRACE_POINTS;
         }
 
         const esp_err_t err = test_session_setup(
