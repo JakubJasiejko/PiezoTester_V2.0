@@ -1,13 +1,6 @@
 /**
  * @file ads1219.h
- * @author inż. Jakub Jasiejko
- * @date 2025-05-30
- * @brief Nagłówki funkcji biblioteki ADS1219 dla ESP32.
- *
- * @details
- * Plik nagłówkowy zawierający deklaracje funkcji do obsługi przetwornika ADC ADS1219
- * przez I2C, wraz z makrami definiującymi konfigurację kanałów, wzmocnienia, prędkości
- * próbkowania, trybu konwersji oraz źródła napięcia odniesienia.
+ * @brief ADS1219 ADC helper interface for the ESP32-based PiezoTester firmware.
  */
 
 #ifndef ADS1219_H
@@ -15,8 +8,6 @@
 
 #include <stdint.h>
 #include "driver/gpio.h"
-
-//ADS1219
 
 #define ADS1219_DRDY_PIN GPIO_NUM_22
 #define ADS1219_RST_PIN GPIO_NUM_5
@@ -48,15 +39,23 @@
 #define WREG 0x40
 #define RREG 0x20
 
-// Deklaracje funkcji
+/** @brief Initializes GPIO resources used by the ADS1219 device. */
 void ADS1219_init(gpio_num_t rstPin, gpio_num_t drdyPin);
+/** @brief Performs a hardware reset pulse on the ADC. */
 void ads1219_hardReset(gpio_num_t resetPin);
+/** @brief Sends the ADS1219 software-reset command. */
 uint8_t ads1219_softReset(uint8_t address);
+/** @brief Starts or synchronizes a conversion. */
 uint8_t ads1219_startSync(uint8_t address);
+/** @brief Places the ADC into power-down mode. */
 uint8_t ads1219_powerDown(uint8_t address);
+/** @brief Triggers a data read transaction. */
 uint8_t ads1219_readDataTrigger(uint8_t address);
+/** @brief Writes the ADS1219 configuration byte. */
 uint8_t ads1219_configureMeasurement(uint8_t address, uint8_t input, uint8_t gain, uint8_t rate, uint8_t mode, uint8_t reference);
+/** @brief Returns true when the DRDY interrupt has been observed. */
 bool ads1219_data_ready();
+/** @brief Reads a 24-bit conversion result from the ADC. */
 int32_t ads1219_read(uint8_t address);
 
 #endif // ADS1219_H

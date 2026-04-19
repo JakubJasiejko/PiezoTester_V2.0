@@ -1,3 +1,15 @@
+/**
+ * @file main.c
+ * @brief Main application logic for the PiezoTester V2.0 ESP32 firmware.
+ *
+ * This module integrates the full measurement pipeline:
+ * - load-cell signal acquisition and calibration
+ * - sensor-path resistance reconstruction and calibration
+ * - electromagnet threshold learning and PWM-to-load model storage
+ * - standard, ramp, and hysteresis session execution
+ * - UART command handling used by the desktop application
+ */
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <math.h>
@@ -63,6 +75,9 @@ static const uint8_t ELECTROMAGNET_CONTACT_POINTS_VERSION = 1;
 #define HYSTERESIS_TRACE_INTERVAL_MS 2
 #define INTER_SAMPLE_DELAY_MS 10000
 
+/**
+ * @brief Persistent load-cell calibration model stored in NVS.
+ */
 typedef struct {
     bool valid;
     float a;
@@ -73,6 +88,9 @@ typedef struct {
     float cal_diff_2;
 } calibration_data_t;
 
+/**
+ * @brief Persistent sensor-path calibration data stored in NVS.
+ */
 typedef struct {
     bool valid;
     float factor;
@@ -81,6 +99,9 @@ typedef struct {
     float measured_voltage;
 } sensor_calibration_t;
 
+/**
+ * @brief Fully processed test result returned to the desktop application.
+ */
 typedef struct {
     float load_voltage;
     float load_zero;
@@ -99,18 +120,27 @@ typedef struct {
     uint16_t phase_point;
 } test_result_t;
 
+/**
+ * @brief Measurement session modes supported by the firmware.
+ */
 typedef enum {
     TEST_MODE_STANDARD = 0,
     TEST_MODE_RAMP = 1,
     TEST_MODE_HYSTERESIS = 2,
 } test_mode_t;
 
+/**
+ * @brief Phase label used mainly by hysteresis traces.
+ */
 typedef enum {
     TEST_PHASE_NONE = 0,
     TEST_PHASE_LOADING = 1,
     TEST_PHASE_UNLOADING = 2,
 } test_phase_t;
 
+/**
+ * @brief State machine for the one-point load-cell calibration workflow.
+ */
 typedef enum {
     CAL_STATE_IDLE = 0,
     CAL_STATE_WAIT_ZERO,
@@ -118,12 +148,18 @@ typedef enum {
     CAL_STATE_READY_TO_SAVE,
 } calibration_state_t;
 
+/**
+ * @brief Empirical PWM-to-load model used by the ramp controller.
+ */
 typedef struct {
     uint8_t point_count;
     float mass_g[ELECTROMAGNET_MODEL_MAX_POINTS];
     uint16_t pwm_duty[ELECTROMAGNET_MODEL_MAX_POINTS];
 } electromagnet_model_t;
 
+/**
+ * @brief Coarse electromagnet premodel based on movement and contact thresholds.
+ */
 typedef struct {
     bool valid;
     uint16_t move_threshold_duty;
@@ -131,6 +167,9 @@ typedef struct {
     float full_scale_mass_g;
 } electromagnet_premodel_t;
 
+/**
+ * @brief Contact calibration table used to classify PWM points.
+ */
 typedef struct {
     uint8_t point_count;
     float start_pct;
@@ -138,6 +177,9 @@ typedef struct {
     uint8_t state[ELECTROMAGNET_CONTACT_POINT_MAX_COUNT];
 } electromagnet_contact_points_t;
 
+/**
+ * @brief Runtime state for the currently active measurement session.
+ */
 typedef struct {
     bool active;
     test_mode_t mode;
@@ -366,6 +408,9 @@ static float sensor_average_voltage(void)
     return acc / (float)CAL_STAGE_MEASUREMENTS;
 }
 
+/**
+ * @brief Returns the absolute load-cell signal relative to the stored zero.
+ */
 static inline float calculate_load_signal(float zero_voltage, float measured_voltage)
 {
     return fabsf(measured_voltage - zero_voltage);
@@ -898,6 +943,9 @@ static esp_err_t load_electromagnet_model_from_nvs(void)
     return ESP_OK;
 }
 
+/**
+ * @brief Inserts or merges one learned actuator-model point and persists it.
+ */
 static void electromagnet_model_upsert_point(float mass_g, uint32_t pwm_duty)
 {
     if (
@@ -1030,6 +1078,12 @@ static uint32_t electromagnet_default_pwm_for_mass(float target_mass_g)
     return (uint32_t)lrintf(estimated);
 }
 
+/**
+ * @brief Estimates the required PWM duty for a requested mass setpoint.
+ *
+ * The estimate is computed from the learned empirical model when points are
+ * available and falls back to the contact-threshold premodel otherwise.
+ */
 static uint32_t electromagnet_estimate_pwm_for_mass(float target_mass_g)
 {
     if (!(target_mass_g >= 0.0f) || !isfinite(target_mass_g)) {
@@ -1240,6 +1294,9 @@ static bool parse_string_argument(const char *line, const char *key, char *value
     return true;
 }
 
+/**
+ * @brief Recomputes the calibrated load-cell scale from the nominal beam model.
+ */
 static esp_err_t calibration_recalculate_model(void)
 {
     const float signal_voltage = fabsf(g_calibration.cal_diff_1);
@@ -1521,6 +1578,9 @@ static esp_err_t load_preview_read(float *measured_voltage_out, float *signal_vo
     return ESP_OK;
 }
 
+/**
+ * @brief Calibrates the sensor resistance path using a reference resistor.
+ */
 static esp_err_t sensor_calibration_run(float reference_resistance)
 {
     if (!(reference_resistance > 0.0f) || !isfinite(reference_resistance)) {
@@ -1667,6 +1727,9 @@ static uint16_t test_session_total_steps(void)
     return g_test_session.sample_count;
 }
 
+/**
+ * @brief Captures a loading and unloading hysteresis burst for one cycle.
+ */
 static esp_err_t test_session_prepare_hysteresis_cycle(uint16_t cycle_index)
 {
     if (!g_test_session.active || g_test_session.mode != TEST_MODE_HYSTERESIS) {
@@ -1720,6 +1783,9 @@ static esp_err_t test_session_prepare_hysteresis_cycle(uint16_t cycle_index)
     return ESP_OK;
 }
 
+/**
+ * @brief Runs one ramp sample using feedforward plus bounded corrective updates.
+ */
 static test_result_t run_targeted_ramp_sample(float target_mass_g, uint32_t initial_pwm_duty, uint32_t session_index)
 {
     uint32_t pwm_duty = initial_pwm_duty;
@@ -2550,6 +2616,9 @@ static void handle_command(const char *line)
     write_line("ERR unknown_command");
 }
 
+/**
+ * @brief ESP-IDF application entry point.
+ */
 void app_main(void)
 {
     initUART();

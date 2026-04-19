@@ -1,14 +1,6 @@
 /**
  * @file uart.h
- * @author inż. Jakub Jasiejko
- * @date 2025-03-15
- * @brief Nagłówek do obsługi komunikacji UART-USB z sumą kontrolną XOR.
- *
- * @details
- * Plik nagłówkowy zawiera deklaracje funkcji służących do inicjalizacji
- * portu UART, rozpoczęcia komunikacji z hostem oraz przesyłania komunikatów
- * diagnostycznych lub błędów. Komunikacja oparta jest na prostym protokole
- * z sumą kontrolną XOR dla weryfikacji danych.
+ * @brief UART transport helpers used by the PiezoTester firmware.
  */
 
  #ifndef UART_H
@@ -38,46 +30,27 @@
 #define TIMEOUT_MS      10000
 
  /**
-  * @brief Oblicza sumę kontrolną XOR dwóch bajtów.
-  *
-  * @param byte1 Pierwszy bajt
-  * @param byte2 Drugi bajt
-  * @return uint8_t Wynik XOR jako suma kontrolna
+  * @brief Computes a simple XOR checksum from two bytes.
   */
  uint8_t checksum(uint8_t byte1, uint8_t byte2);
  
  /**
-  * @brief Inicjalizuje port UART z ustawieniami z pliku konfiguracyjnego.
-  *
-  * Parametry transmisji:
-  * - Prędkość transmisji (BAUDRATE)
-  * - 8 bitów danych
-  * - 1 bit stopu
-  * - Brak parzystości i flow control
+  * @brief Initializes the UART peripheral used for host communication.
   */
  void initUART();
  
  /**
-  * @brief Rozpoczyna komunikację UART z komputerem lub urządzeniem nadrzędnym.
-  *
-  * Czeka na ramkę startową [0xAA][0x01][checksum], weryfikuje poprawność danych
-  * i wysyła odpowiedź potwierdzającą lub komunikat o błędzie (timeout).
+  * @brief Starts the UART handshake with the host.
   */
  void beginSerialCommunication();
  
  /**
-  * @brief Wysyła ramkę błędu w formacie [0xAA][errorMask][checksum].
-  *
-  * @param errorMask Kod błędu do przesłania przez UART (np. 0xCC, 0xDD)
+  * @brief Sends a framed UART error message.
   */
  void errorOnUART(uint8_t errorMask);
  
  /**
-  * @brief Wysyła 16-bitową wartość w formacie binarnym (ASCII '0'/'1') przez UART.
-  *
-  * Umożliwia debugowanie wartości konfiguracyjnych (np. rejestry FDC1004).
-  *
-  * @param value Wartość 16-bitowa do wyświetlenia binarnie
+  * @brief Prints a 16-bit value as an ASCII binary string over UART.
   */
  void binaryDebug(uint16_t value);
  
