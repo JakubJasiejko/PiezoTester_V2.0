@@ -1,0 +1,353 @@
+	(footprint "TL431CLPM"
+		(layer "F.Cu")
+		(uuid "7098eb4b-98b4-4f24-90b8-7d551175e660")
+		(at 188.2 66.56 -90)
+		(descr "LP0003A_2")
+		(tags "Integrated Circuit")
+		(property "Reference" "LDO"
+			(at 1.27 2.7 90)
+			(layer "F.SilkS")
+			(uuid "aa0cc840-63d8-40b6-bc57-456af0952708")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.254)
+				)
+			)
+		)
+		(property "Value" "LP2950-33LPRE3"
+			(at 1.27 0.525 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "4a91aef2-faef-45ed-b1a7-d477a6f8fd1c")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.254)
+				)
+			)
+		)
+		(property "Datasheet" "http://www.ti.com/lit/gpn/lp2950"
+			(at 0 0 90)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "731c06ce-5a36-4611-8761-ef78e19c10ba")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Description" "Adjustable Micropower Voltage Regulator With Shutdown"
+			(at 0 0 90)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "4c9a1cb7-42ea-41e3-9e47-81d4c85a961e")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Description_1" "Adjustable Micropower Voltage Regulator With Shutdown"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "451c3775-4834-4c43-b986-ce9759570c1c")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Height" "9.34"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "9113c82b-3f86-432e-8bfc-cd962707f383")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Mouser Part Number" "595-LP2950-33LPRE3"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "01198447-8a52-4599-b2b7-790a520f4437")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Mouser Price/Stock" "https://www.mouser.co.uk/ProductDetail/Texas-Instruments/LP2950-33LPRE3?qs=iSMark9AYDUagDsOL8Eqdw%3D%3D"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "33e3b305-3ab3-4b0c-8c0a-e235dcd382b5")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer_Name" "Texas Instruments"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "342f40b5-21e7-4aac-82a4-c33827970b1e")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer_Part_Number" "LP2950-33LPRE3"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "719ffe65-77c8-4eba-a6b3-891867335e16")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(path "/6f64c413-b244-4070-bd09-31f457d4ae56")
+		(sheetname "/")
+		(sheetfile "piezoTester v2.2.kicad_sch")
+		(attr through_hole exclude_from_pos_files)
+		(fp_line
+			(start 3.67 0)
+			(end 2.985 -1.35)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "955488fd-53cf-47a7-9cfb-5b150772b4f2")
+		)
+		(fp_line
+			(start -1.809 -0.005)
+			(end -1.809 -0.005)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "3ce579ea-e5ec-4738-b303-b3494b8c8c0c")
+		)
+		(fp_line
+			(start -1.707 -0.005)
+			(end -1.707 -0.005)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "3d4b14f0-2469-42a6-ba68-41a7d087ba1b")
+		)
+		(fp_line
+			(start -0.445 -1.35)
+			(end -1.13 0)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "584bdc59-cb6e-4a4a-8295-233d0befdd34")
+		)
+		(fp_line
+			(start 2.985 -1.35)
+			(end -0.445 -1.35)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "ee3fedeb-3123-481c-9989-c74d704ec2a2")
+		)
+		(fp_arc
+			(start -1.605 -0.005)
+			(mid -1.656 0.046)
+			(end -1.707 -0.005)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "529182a8-b293-4165-b285-1d424fdfa1d3")
+		)
+		(fp_arc
+			(start -1.503 -0.005)
+			(mid -1.656 0.148)
+			(end -1.809 -0.005)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "a4a10314-da87-4efd-9dd4-f20a987a3ab2")
+		)
+		(fp_line
+			(start -2.13 3.4)
+			(end -2.13 -2.35)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "Dwgs.User")
+			(uuid "62354584-9f5c-4a39-b5a7-731b90cb13c0")
+		)
+		(fp_line
+			(start 4.67 3.4)
+			(end -2.13 3.4)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "Dwgs.User")
+			(uuid "692db269-3992-4b65-a994-451dd63c8918")
+		)
+		(fp_line
+			(start -1.13 0)
+			(end 3.67 0)
+			(stroke
+				(width 0.2)
+				(type solid)
+			)
+			(layer "Dwgs.User")
+			(uuid "559294ab-f96d-4227-bbff-e15aecd5f243")
+		)
+		(fp_line
+			(start 3.67 0)
+			(end 3.67 0)
+			(stroke
+				(width 0.2)
+				(type solid)
+			)
+			(layer "Dwgs.User")
+			(uuid "089dcbba-b141-4fb6-97a1-3cfe8f5994f8")
+		)
+		(fp_line
+			(start 3.67 0)
+			(end 2.985 -1.35)
+			(stroke
+				(width 0.2)
+				(type solid)
+			)
+			(layer "Dwgs.User")
+			(uuid "bfe0850f-8bfd-4f45-9ae5-002b31077c39")
+		)
+		(fp_line
+			(start -0.445 -1.35)
+			(end -1.13 0)
+			(stroke
+				(width 0.2)
+				(type solid)
+			)
+			(layer "Dwgs.User")
+			(uuid "d49e3a47-b80f-4218-a3ef-2d3ea12e85cc")
+		)
+		(fp_line
+			(start 2.985 -1.35)
+			(end -0.445 -1.35)
+			(stroke
+				(width 0.2)
+				(type solid)
+			)
+			(layer "Dwgs.User")
+			(uuid "6a974aa6-f05b-4c3a-966a-63f7be07ac80")
+		)
+		(fp_line
+			(start 2.985 -1.35)
+			(end -0.445 -1.35)
+			(stroke
+				(width 0.2)
+				(type solid)
+			)
+			(layer "Dwgs.User")
+			(uuid "78fffb3b-fe2e-4f0d-82af-889c768a0d12")
+		)
+		(fp_line
+			(start -2.13 -2.35)
+			(end 4.67 -2.35)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "Dwgs.User")
+			(uuid "19dde7d3-5b6d-45a8-a9b8-60f3c3980605")
+		)
+		(fp_line
+			(start 4.67 -2.35)
+			(end 4.67 3.4)
+			(stroke
+				(width 0.1)
+				(type solid)
+			)
+			(layer "Dwgs.User")
+			(uuid "713c8a80-bc54-4407-ae30-1a8bdc43db9c")
+		)
+		(fp_arc
+			(start 8.47 0)
+			(mid 6.07 2.4)
+			(end 3.67 0)
+			(stroke
+				(width 0.2)
+				(type solid)
+			)
+			(layer "Dwgs.User")
+			(uuid "838c84e3-b602-4bdf-accc-3cc07ab5c45c")
+		)
+		(pad "1" thru_hole circle
+			(at 0 0)
+			(size 1.4 1.4)
+			(drill 0.9)
+			(layers "*.Cu" "*.Mask" "F.SilkS")
+			(remove_unused_layers no)
+			(net 39 "+3.3V")
+			(pinfunction "OUTPUT")
+			(pintype "passive")
+			(uuid "ed5d286a-7e65-4e81-90b9-45f09e78199c")
+		)
+		(pad "2" thru_hole circle
+			(at 1.27 1)
+			(size 1.4 1.4)
+			(drill 0.9)
+			(layers "*.Cu" "*.Mask" "F.SilkS")
+			(remove_unused_layers no)
+			(net 26 "GND")
+			(pinfunction "GND")
+			(pintype "passive")
+			(uuid "cd9f7547-90e8-4cc3-8c5b-e258e2421f42")
+		)
+		(pad "3" thru_hole circle
+			(at 2.54 0)
+			(size 1.4 1.4)
+			(drill 0.9)
+			(layers "*.Cu" "*.Mask" "F.SilkS")
+			(remove_unused_layers no)
+			(net 3 "BUCK_OUT")
+			(pinfunction "INPUT")
+			(pintype "passive")
+			(uuid "5295d81c-43d3-464f-8c73-103eeb11211a")
+		)
+		(embedded_fonts no)
+	)

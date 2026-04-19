@@ -3932,16 +3932,6 @@
 		)
 		(uuid "666812ad-3432-46a9-8d56-b285e5e4ad66")
 	)
-	(text "SENSOR SECTION"
-		(exclude_from_sim no)
-		(at 196.85 20.32 0)
-		(effects
-			(font
-				(size 5.08 5.08)
-			)
-		)
-		(uuid "7ba4f550-3e01-4492-a3af-797beaeda318")
-	)
 	(text "POWER SECTION"
 		(exclude_from_sim no)
 		(at 59.69 104.394 0)

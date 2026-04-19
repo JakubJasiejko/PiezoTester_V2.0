@@ -60,19 +60,7 @@
       ],
       "drc_exclusions": [
         [
-          "unconnected_items|126500000|102400000|7b471439-45ff-4b9a-9a8f-c99c26ab271e|5644fd45-0cf6-4f85-8f5f-cab799124692",
-          ""
-        ],
-        [
-          "unconnected_items|129550000|86500000|c24d3b8c-578c-419f-a505-bd4a6962eb17|1481aa68-fcfd-4bea-987c-a71c75fd5d8c",
-          ""
-        ],
-        [
-          "unconnected_items|129599746|105996585|8157de93-f862-48be-9dc3-92b718938189|099b5979-0679-4340-970e-a17a1bd59327",
-          ""
-        ],
-        [
-          "unconnected_items|195465371|92636698|90559160-b2c5-486d-82e4-e7019471a8a8|90559160-b2c5-486d-82e4-e7019471a8a8",
+          "unconnected_items|129550000|86500000|F.Cu|4|aa010026-c059-476b-8fb5-d3bde0dacc40|1481aa68-fcfd-4bea-987c-a71c75fd5d8c",
           ""
         ]
       ],
@@ -124,6 +112,7 @@
         "solder_mask_bridge": "error",
         "starved_thermal": "error",
         "text_height": "ignore",
+        "text_on_edge_cuts": "error",
         "text_thickness": "warning",
         "through_hole_pad_without_hole": "error",
         "too_many_vias": "error",
@@ -477,6 +466,7 @@
       "single_global_label": "ignore",
       "unannotated": "error",
       "unconnected_wire_endpoint": "warning",
+      "undefined_netclass": "error",
       "unit_value_mismatch": "error",
       "unresolved_variable": "error",
       "wire_dangling": "error"
@@ -523,7 +513,7 @@
       "gencad": "",
       "idf": "",
       "netlist": "",
-      "plot": "production_files/",
+      "plot": "Gerber_11.04.2026/",
       "pos_files": "",
       "specctra_dsn": "",
       "step": "",

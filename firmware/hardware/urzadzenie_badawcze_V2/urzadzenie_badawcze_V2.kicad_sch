@@ -3922,7 +3922,7 @@
 				)
 			)
 		)
-		(property "Value" "R 200K"
+		(property "Value" "R 100K"
 			(at 225.552 110.236 90)
 			(effects
 				(font

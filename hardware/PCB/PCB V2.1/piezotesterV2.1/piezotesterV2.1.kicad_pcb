@@ -103,7 +103,6 @@
 			(psnegative no)
 			(psa4output no)
 			(plot_black_and_white yes)
-			(plotinvisibletext no)
 			(sketchpadsonfab no)
 			(plotpadnumbers no)
 			(hidednponfab no)
@@ -369,7 +368,7 @@
 			(uuid "6b7548be-8f15-4af7-9fc4-944a5ca2468f")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -713,7 +712,7 @@
 			(uuid "8c2e9d52-abee-4bac-a7e8-7196f949a18e")
 		)
 		(embedded_fonts no)
-		(model "MCP6002-I_P.stp"
+		(model "${KIPRJMOD}/3dmodels/MCP6002-I_P.stp"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -914,7 +913,7 @@
 			(uuid "1cbdd7c5-9d69-4285-aa7b-1bdbb825a38b")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -1115,7 +1114,7 @@
 			(uuid "80863623-f8b0-46a1-87fd-e970a73ccfe9")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -1316,7 +1315,7 @@
 			(uuid "efc59d4c-4cbc-4191-8428-da738b05ced8")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -1861,7 +1860,7 @@
 			(uuid "1d0cb9eb-567a-44b9-98f3-0d7ff9c0cf9f")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x02_P2.54mm_Horizontal.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x02_P2.54mm_Horizontal.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -2668,7 +2667,7 @@
 			(uuid "68e0dec2-7a9d-4c8b-b6a0-d9fe337afc0d")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x04_P2.54mm_Horizontal.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x04_P2.54mm_Horizontal.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -2869,7 +2868,7 @@
 			(uuid "fcc8f64e-e98e-4570-b40f-7477cfafa203")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -3070,7 +3069,7 @@
 			(uuid "9801f009-72b9-4ce8-8451-1304ece7b6be")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -5146,7 +5145,7 @@
 			(uuid "b3a4274f-437e-4649-b694-97cf3e77ac50")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_THT.3dshapes/CP_Radial_D10.0mm_P5.00mm.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_THT.3dshapes/CP_Radial_D10.0mm_P5.00mm.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -6298,6 +6297,17 @@
 			(uuid "cc7ed2bd-0e86-4003-b13c-6bb5bb26a845")
 		)
 		(embedded_fonts no)
+		(model "${KIPRJMOD}/3dmodels/ESP32-WROOM-32D-Assembly.STEP"
+			(offset
+				(xyz 12.5 -22 2.5)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz 90 180 180)
+			)
+		)
 	)
 	(footprint "ADS1115_Salamon:TL431CLPM"
 		(layer "F.Cu")
@@ -6841,7 +6851,7 @@
 			(uuid "6e7e5113-7972-4c78-b67c-2deafd2f1217")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -7042,7 +7052,7 @@
 			(uuid "8b932380-1a37-466b-b4ae-18c576b951aa")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -7243,7 +7253,7 @@
 			(uuid "4f0cc80a-33ba-4d81-8ece-7dd8103c3065")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -8068,7 +8078,7 @@
 			(uuid "c70cc6a9-9d81-4494-99cc-e7947b5b6c11")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Inductor_SMD.3dshapes/L_12x12mm_H6mm.wrl"
+		(model "${KIPRJMOD}/3dmodels/L_12x12mm_H6mm.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -8269,7 +8279,7 @@
 			(uuid "6d99130c-ee9b-4003-b236-120019e744b0")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -8814,7 +8824,7 @@
 			(uuid "1602e3e4-ab53-4ca8-b7bb-47e1bb8d7eb1")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x02_P2.54mm_Horizontal.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x02_P2.54mm_Horizontal.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -9015,7 +9025,7 @@
 			(uuid "9e51e8cb-41d8-4c50-9ea3-11ee202ac100")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -9315,6 +9325,17 @@
 			(uuid "48efd9ae-e677-4360-adb2-bf2413d5fb34")
 		)
 		(embedded_fonts no)
+		(model "${KIPRJMOD}/3dmodels/ADS1219_SparkFun.wrl"
+			(offset
+				(xyz -10.16 12.7 0)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz 0 0 0)
+			)
+		)
 	)
 	(footprint "Capacitor_THT:CP_Radial_D8.0mm_P3.50mm"
 		(layer "F.Cu")
@@ -11030,7 +11051,7 @@
 			(uuid "e485b095-d376-4583-84fd-6593204bebc2")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_THT.3dshapes/CP_Radial_D8.0mm_P3.50mm.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_THT.3dshapes/CP_Radial_D8.0mm_P3.50mm.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -11231,7 +11252,7 @@
 			(uuid "1d5a68d5-018d-42d9-a315-f5c4441a1b33")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -11525,7 +11546,7 @@
 			(uuid "b9092d16-da05-4643-be3d-a47c4cac37d2")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Package_TO_SOT_THT.3dshapes/TO-220-3_Vertical.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Package_TO_SOT_THT.3dshapes/TO-220-3_Vertical.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -11872,7 +11893,7 @@
 			(uuid "f37b552b-53d9-4542-9234-1b7608484aef")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Diode_THT.3dshapes/D_DO-201AD_P15.24mm_Horizontal.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Diode_THT.3dshapes/D_DO-201AD_P15.24mm_Horizontal.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -12073,7 +12094,7 @@
 			(uuid "74687a18-48a8-4afa-82d0-a8313de2c0ff")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -12274,7 +12295,7 @@
 			(uuid "2863eee3-8ee5-4f73-9b28-0062e1b6389a")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model " ${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl 1"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -12476,7 +12497,7 @@
 			(uuid "6d862908-5b13-4fb0-a1e2-941199f68186")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -12677,7 +12698,7 @@
 			(uuid "6df6f76e-c7fd-475d-9f8c-86329a924e3e")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -12980,6 +13001,17 @@
 			(uuid "b1d04d58-95a9-45cc-8bcb-70c4d447272d")
 		)
 		(embedded_fonts no)
+		(model "${KIPRJMOD}/3dmodels/LM2596S-5.0_NOPB.stp"
+			(offset
+				(xyz 9 0 0)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz -0 -0 -90)
+			)
+		)
 	)
 	(footprint "Resistor_SMD:R_1206_3216Metric"
 		(layer "F.Cu")
@@ -13170,7 +13202,7 @@
 			(uuid "85ac9722-d0a9-40b1-a2b0-0e3a4e61b400")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -13715,7 +13747,7 @@
 			(uuid "28bc7c60-4213-4c91-9786-c6c4e96d0f95")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x02_P2.54mm_Horizontal.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x02_P2.54mm_Horizontal.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -13916,7 +13948,7 @@
 			(uuid "46ed57b8-767d-4790-8351-71ed8985e9ac")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -14117,7 +14149,7 @@
 			(uuid "78d6662b-c190-4ecb-ba55-e4c9c08e35e9")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -14337,7 +14369,7 @@
 			(uuid "cd09b6ba-8a4b-46a8-82e1-555136f166c6")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Package_TO_SOT_THT.3dshapes/TO-92_Inline.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Package_TO_SOT_THT.3dshapes/TO-92_Inline.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -14538,7 +14570,7 @@
 			(uuid "542a571e-c636-4e08-82d8-b29e9243413e")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -14895,7 +14927,7 @@
 			(uuid "2220fbfb-0405-41b4-9502-1a1cf697d720")
 		)
 		(embedded_fonts no)
-		(model "MCP6002-I_P.stp"
+		(model "${KIPRJMOD}/3dmodels/MCP6002-I_P.stp"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -15096,7 +15128,7 @@
 			(uuid "d346a404-292b-4142-9dda-8cddd51a9949")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -15297,7 +15329,7 @@
 			(uuid "039a3625-0e1c-4f90-98b4-9bd3b52f3678")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -15498,7 +15530,7 @@
 			(uuid "4737e54f-b98c-450e-82d5-d824246ddc77")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -15699,7 +15731,7 @@
 			(uuid "fdc6129f-e7c8-4cc1-908a-0e7d0b898dd4")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -16046,7 +16078,7 @@
 			(uuid "b12f9352-7c73-499d-9fff-7a338085cf1f")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Diode_THT.3dshapes/D_DO-201AD_P15.24mm_Horizontal.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Diode_THT.3dshapes/D_DO-201AD_P15.24mm_Horizontal.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -16247,7 +16279,7 @@
 			(uuid "487d7d23-a30a-4eef-9bdf-286c4f8c1ca8")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -16448,7 +16480,7 @@
 			(uuid "270bcacf-9875-47d6-a12b-93d73c138e0f")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -16649,7 +16681,7 @@
 			(uuid "90eda6af-97e0-46a7-b169-7cdf9a6225c1")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -16850,7 +16882,7 @@
 			(uuid "9ecac118-4515-4b6f-936f-35ca076efc40")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -17051,7 +17083,7 @@
 			(uuid "ce9c2c70-b336-45c9-9659-9867c0daf2c4")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Resistor_SMD.3dshapes/R_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -17252,7 +17284,7 @@
 			(uuid "8bbfe8fc-5ed5-4eb9-9e2b-a826a9753210")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -17453,7 +17485,7 @@
 			(uuid "36f3092c-4d5c-433d-961b-d5662ab00dd4")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -17654,7 +17686,7 @@
 			(uuid "dc2b57c0-2c2f-47ed-a07f-9954da3acfc5")
 		)
 		(embedded_fonts no)
-		(model "${KICAD9_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
+		(model "${KIPRJMOD}/3dmodels/kicad/Capacitor_SMD.3dshapes/C_1206_3216Metric.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
